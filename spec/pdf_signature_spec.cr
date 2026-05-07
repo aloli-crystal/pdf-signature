@@ -1,9 +1,16 @@
 require "./spec_helper"
 
+require "yaml"
+
 describe PDF::Signature do
   describe "VERSION" do
-    it "expose une version SemVer 0.1.x" do
-      PDF::Signature::VERSION.should match(/^0\.1\.\d+/)
+    it "matche shard.yml (compile-time, pas de désynchro possible)" do
+      yml = YAML.parse(File.read(File.join(__DIR__, "..", "shard.yml")))
+      PDF::Signature::VERSION.should eq(yml["version"].as_s)
+    end
+
+    it "est au format SemVer X.Y.Z" do
+      PDF::Signature::VERSION.should match(/^\d+\.\d+\.\d+$/)
     end
   end
 

@@ -7,6 +7,21 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.1.1 — 2026-05-07
+
+=== Fixed
+
+* **`PDF::Signature::VERSION` read at compile-time from `shard.yml`**
+  (instead of being hardcoded). Pattern reproduced identically in
+  `aloli-crystal/pdf` v0.5.4 and `aloli-crystal/crystal-combine-pdf`
+  v1.0.31.34. Bug consumers would see: the Crystal constant and the
+  `shard.yml` `version:` could silently diverge because the manual
+  release bump might forget one or the other. The `read_file` macro
+  removes that risk.
+
+* `pdf_signature_spec.cr` updated: now compares `PDF::Signature::VERSION`
+  to the parsed `version:` from `shard.yml` at runtime.
+
 == v0.1.0 — 2026-05-07
 
 **Shard creation and initial skeleton.** The shard is set up,
