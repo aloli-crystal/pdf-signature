@@ -1,0 +1,25 @@
+# Crystal — sortie compilée et dépendances
+/docs/
+/lib/
+/bin/
+/.shards/
+*.dwarf
+
+# Binaires compilés
+/pdf-signature
+/pdf_signature
+
+# Editor / OS
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Couverture / profilage
+/coverage/
+
+# Fixtures temporaires
+*.tmp
+/tmp/
+/spec/tmp/

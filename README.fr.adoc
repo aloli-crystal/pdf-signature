@@ -1,0 +1,142 @@
+= aloli-crystal/pdf-signature
+:toc: left
+:toc-title: Sommaire
+
+Bibliothèque Crystal pour signer numériquement des PDFs au format
+**PAdES** (PDF Advanced Electronic Signatures, ETSI EN 319 142).
+
+Compagnon du shard `aloli-crystal/pdf` qui couvre déjà le
+chiffrement (RC4 / AES-128 / AES-256) et le parsing/écriture de
+PDFs. Ce shard ajoute la **signature numérique**, qui est la seule
+protection cryptographique permettant de **détecter toute
+modification** d'un PDF.
+
+[NOTE]
+====
+Ce shard est en début de vie (v0.1). Voir `doc/RATIONALE.adoc`
+pour l'analyse de fond (PAdES, TSA, infrastructure de confiance,
+trajectoire ALOLI, choix architecturaux).
+====
+
+== Pourquoi un shard dédié ?
+
+Trois protections distinctes coexistent sur un PDF :
+
+[cols="1,1,1,1",options="header"]
+|===
+| Protection | Empêche la lecture | Détecte la modification | Cryptographique
+| Mot de passe utilisateur | ✅ | ❌ | ✅
+| Permissions (`/P`) | ❌ | ⚠️ honor-system | ❌
+| **Signature numérique** | ❌ | ✅ | ✅
+|===
+
+Les deux premières sont gérées par `aloli-crystal/pdf`. La
+**signature** mérite son propre shard parce que :
+
+* Surface API distincte (signature ≠ chiffrement).
+* Dépendances optionnelles (tout consommateur de `pdf` ne signera pas).
+* Cycle de release différent (PAdES B-B → B-T → B-LT → B-LTA,
+  algorithmes post-quantique…).
+
+== État de la roadmap
+
+[cols="1,3,1",options="header"]
+|===
+| Version | Cible | Statut
+
+| v0.1
+| PAdES B-B (signature de base, PKCS#7 détaché)
+| 🚧 en cours
+
+| v0.2
+| PAdES B-T (horodatage RFC 3161)
+| 📋 prévu
+
+| v0.3
+| PAdES B-LT (matériel de validation long-terme via `/DSS`)
+| 📋 prévu
+
+| v0.4
+| PAdES B-LTA (horodatage d'archive — extension indéfinie)
+| 📋 prévu
+
+| v0.5
+| Vérification (lecture + validation)
+| 📋 prévu
+
+| v0.6+
+| Backend HSM / PKCS#11
+| 💭 idée
+|===
+
+== Démarrage rapide (à venir, v0.1 en cours)
+
+[source,crystal]
+----
+require "pdf-signature"
+
+# Signer un PDF existant (incremental update)
+PDF::Signature::Signer.sign(
+  input:  "rapport.pdf",
+  output: "rapport-signe.pdf",
+  certificate: "./signataire.p12",
+  passphrase: "...",       # ou via env / iCloud Keychain
+  level: :b_b,             # :b_b | :b_t | :b_lt | :b_lta (futur)
+  reason: "Validation rapport ISO 27001",
+  location: "Laguiole, FR",
+  signing_time: Time.utc,
+)
+----
+
+== Niveaux PAdES — résumé
+
+[cols="1,3,3",options="header"]
+|===
+| Niveau | Garantie principale | Cas d'usage typique
+
+| **B-B**
+| Détection de modification + identité du signataire (date auto-déclarée)
+| Signatures internes, validation immédiate
+
+| **B-T**
+| B-B + preuve de date par TSA tierce
+| Rapports d'audit ISO 27001, contrats moyens-terme — minimum eIDAS avancé
+
+| **B-LT**
+| B-T + matériel de validation embarqué (CRL/OCSP/certs)
+| Politiques de sécurité, dossiers réglementaires (5-10 ans)
+
+| **B-LTA**
+| B-LT + horodatage d'archive renouvelable
+| Archives légales, signatures qualifiées eIDAS, notarié
+|===
+
+== Installation
+
+[source,yaml]
+----
+dependencies:
+  pdf-signature:
+    github: aloli-crystal/pdf-signature
+    version: "~> 0.1"
+----
+
+== Dépendances
+
+* https://github.com/aloli-crystal/pdf[`aloli-crystal/pdf`] ≥ 0.5
+  — modèle objet PDF, parser, écriture
+* OpenSSL CLI ≥ 1.1 (déjà sur tous les Unix modernes) — utilisé
+  pour PKCS#7 et RFC 3161 (le shard appelle `openssl cms` et
+  `openssl ts` en sous-processus, conformément à la note dans
+  `doc/RATIONALE.adoc` § Choix techniques)
+
+== Documentation
+
+* `doc/RATIONALE.adoc` — analyse de fond : principes des signatures,
+  les 4 niveaux PAdES, construction d'une TSA, modèle Sigstore,
+  trajectoire infrastructure de confiance ALOLI, décisions architecturales
+* `CHANGELOG.fr.adoc` — historique des versions
+
+== Licence
+
+MIT — voir `LICENSE`.

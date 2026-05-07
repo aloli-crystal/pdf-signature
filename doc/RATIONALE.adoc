@@ -1,0 +1,989 @@
+= Signatures numériques de PDF — Principes, infrastructures et trajectoire ALOLI
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+:date: 2026-05-07
+
+[abstract]
+Document de référence consolidé après les échanges 2026-05-06/07
+sur le chiffrement, les signatures, les TSA et la possibilité de
+construire une infrastructure de confiance ALOLI. Sert de base
+décisionnelle pour le shard `aloli-crystal/pdf-signature` et toute
+extension future (Sigstore-like Crystal, trust ALOLI privée, AATL,
+eIDAS qualifié).
+
+== Pourquoi ce document existe
+
+Trois questions étaient sur la table après l'implémentation
+chiffrement/déchiffrement AES dans `aloli-crystal/pdf` v0.5.x :
+
+. Comment empêcher la **modification** d'un PDF sans empêcher
+  sa **lecture** ?
+. Comment fonctionnent les **PDFs signés** (et que font les outils
+  qui les vérifient) ?
+. Au-delà de la mécanique technique, est-ce qu'ALOLI doit aller
+  vers la création d'une **infrastructure de confiance** ?
+
+Les sections qui suivent sont l'aboutissement écrit de cette
+réflexion. Elles serviront de référence quand on relira ce dossier
+dans 6, 12 ou 24 mois pour décider de l'étape suivante.
+
+== Trois protections distinctes — clarification fondamentale
+
+Avant tout : il y a **trois mécanismes** qui peuvent protéger un
+PDF, et ils ne se substituent pas l'un à l'autre. Confondre les
+trois est une erreur courante.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| Protection
+| Mécanisme PDF
+| Empêche la lecture
+| Détecte la modification
+| Cryptographique
+
+| **Mot de passe utilisateur**
+| `/Encrypt` + `/U`
+| ✅
+| ❌
+| ✅ (RC4 / AES)
+
+| **Permissions**
+| `/Encrypt` + `/P` + `/Perms`
+| ❌
+| ⚠️ honor-system
+| ❌
+
+| **Signature numérique**
+| `/Sig` PKCS#7 (PAdES)
+| ❌
+| ✅
+| ✅ (RSA / ECDSA)
+|===
+
+* **Chiffrement** : on rend les octets illisibles sans clé.
+  Excellent pour la confidentialité, **inutile** pour prouver
+  que le PDF n'a pas été modifié — un PDF chiffré peut être
+  remplacé entièrement.
+* **Permissions** : flags déclaratifs dans `/P` qui demandent
+  *gentiment* aux visualiseurs de refuser la modification, la copie
+  ou l'impression. Acrobat / Foxit / Preview / pdftk respectent
+  ces flags, mais un attaquant peut simplement enlever `/Encrypt`.
+* **Signature** : seul mécanisme **cryptographiquement** capable
+  de détecter la moindre modification d'un seul octet. C'est le
+  sujet de ce document.
+
+[NOTE]
+====
+Pour la majorité des cas pratiques, on combine les trois :
+chiffrement + permissions pour empêcher la diffusion non
+autorisée, signature pour garantir l'intégrité. Le shard
+`aloli-crystal/pdf` v0.5.2 traite déjà 1 et 2 ; le shard
+`aloli-crystal/pdf-signature` traitera 3.
+====
+
+== Principes de la signature numérique
+
+=== Le problème en une phrase
+
+*« Comment prouver, dans 20 ans, que ce PDF a été signé par
+Philippe Nénert le 7 mai 2026 à 14h32, et qu'il n'a pas changé
+d'un seul octet depuis ? »*
+
+C'est exactement ce que résout PAdES, par couches successives.
+
+=== Qu'est-ce qu'une signature numérique ?
+
+Une signature numérique d'un fichier `F` est le résultat de trois
+étapes :
+
+. Calcul d'un hash cryptographique `H = SHA-256(F)` (ou SHA-384,
+  SHA-512). Le hash est une empreinte de taille fixe : si un
+  seul octet de `F` change, `H` change radicalement.
+. Chiffrement de `H` avec la **clé privée** du signataire :
+  `S = RSA-Sign(H, K_priv)` (ou ECDSA-Sign).
+. Embarquement de `(S, certificat_du_signataire)` dans un format
+  standardisé — pour PDF c'est PKCS#7 / CMS (RFC 5652).
+
+Un vérificateur a :
+
+. La même fonction de hash → recalcule `H'` à partir des octets du
+  PDF.
+. La **clé publique** du signataire (extraite du certificat) →
+  déchiffre `S` pour récupérer `H`.
+. Compare : `H == H'` ⇒ pas de modification, signature valide.
+
+La force du système repose sur trois propriétés :
+
+* **Asymétrie cryptographique** : la clé privée ne peut être
+  utilisée que par son détenteur ; la clé publique permet à tous
+  de vérifier sans pouvoir signer.
+* **Unicité du hash** : il est computationnellement impossible
+  (>= 2^128 opérations pour SHA-256) de produire deux fichiers
+  différents avec le même hash.
+* **Chaîne de confiance du certificat** : la clé publique est
+  elle-même signée par une autorité de certification (CA), qui
+  est signée par une CA racine, qui est dans le trust store du
+  vérificateur (Acrobat, Microsoft, Mozilla…).
+
+=== Anatomie d'une signature dans un PDF
+
+[source]
+----
+PDF
+└── /AcroForm
+    └── /Fields [N 0 R]
+              ↓
+              /Sig
+              ├── /Type /Sig
+              ├── /Filter /Adobe.PPKLite     ← module crypto utilisé
+              ├── /SubFilter /adbe.pkcs7.detached  ← format de la signature
+              ├── /Contents <60008210...000000>    ← signature PKCS#7 (hex)
+              ├── /ByteRange [0 X X X]              ← octets couverts par la signature
+              ├── /M (D:20260507143200+02'00')      ← signing time auto-déclaré
+              ├── /Name (Philippe Nénert)
+              ├── /Reason (Validation rapport ISO 27001)
+              ├── /Location (Laguiole, FR)
+              └── /ContactInfo (philippe@aloli.fr)
+----
+
+Points cruciaux :
+
+* `/Contents` est **réservé en taille fixe** dans le PDF avant
+  la signature (typiquement 16384 octets). On y écrit une
+  signature DER PKCS#7 puis on remplit avec des zéros.
+* `/ByteRange` indique au vérificateur les zones du PDF couvertes
+  par le hash : tout sauf les octets de `/Contents` lui-même.
+* Le hash signé est calculé sur **`/ByteRange`**, pas sur le PDF
+  entier — sinon il faudrait inclure la signature dans son propre
+  hash, ce qui est mathématiquement impossible.
+
+=== Familles de signatures avancées (xAdES)
+
+Trois standards ETSI dérivés du même socle :
+
+[cols="1,2,3",options="header"]
+|===
+| Standard | Pour | Notes
+| **CAdES** | Tout fichier (CMS) | Signature détachée stockée à côté
+| **XAdES** | XML | Signature embarquée dans le XML
+| **PAdES** | PDF | Signature embarquée dans `/Sig`
+|===
+
+PAdES = ETSI EN 319 142, hérite de CAdES avec spécifications
+PDF-spécifiques (byte range, incremental updates, etc.).
+
+== Les quatre niveaux PAdES
+
+Chaque niveau ajoute une couche pour résoudre une faiblesse du
+précédent. **Comprendre ces niveaux est essentiel** pour décider
+quoi implémenter et dans quel ordre.
+
+=== B-B (Baseline B) — la signature de base
+
+[source]
+----
+PDF
+└── /Sig
+    ├── Hash SHA-256 du PDF (excluant /Contents)
+    ├── Hash chiffré avec la clé privée du signataire (= signature)
+    └── Certificat du signataire (+ chaîne optionnelle)
+----
+
+Mécanisme : enveloppe PKCS#7 (CMS, RFC 5652) embarquée dans
+`/Sig`. Une modification d'un seul octet du PDF invalide la
+signature.
+
+**Garanties** :
+
+* ✅ Le PDF n'a pas été modifié depuis la signature
+* ✅ Le PDF a été signé par le détenteur du certificat X
+* ⚠️ Date de signature **auto-déclarée** dans `signingTime` PKCS#7
+  → le signataire peut antidater
+
+**Utilité** : signatures éphémères, vérifiées immédiatement,
+contexte de confiance interne.
+
+**Faille** : si le certificat est révoqué demain, on ne peut pas
+savoir si la signature a été apposée AVANT ou APRÈS la révocation.
+Donc impossible de juger sa validité après-coup.
+
+**Taille** : 5-10 Ko de surcoût.
+
+=== B-T (Baseline T = Timestamp) — l'horodatage qualifié
+
+[source]
+----
+PDF
+└── /Sig
+    ├── [tout B-B]
+    └── Timestamp Token (RFC 3161) attaché à la signature
+        ├── Hash de la signature de B-B
+        ├── Date/heure UTC de la TSA
+        └── Signature de la TSA (Time-Stamping Authority)
+----
+
+Mécanisme : après avoir produit la signature B-B, le signataire
+envoie son hash à une **TSA** (Time-Stamping Authority) — un
+service tiers de confiance via HTTP RFC 3161. La TSA renvoie un
+*timestamp token* signé qui atteste *« j'ai vu ce hash à telle
+date »*. Ce token est embarqué dans la signature.
+
+**Garanties supplémentaires** :
+
+* ✅ La signature **existait avant** la date T attestée par la TSA
+* ✅ Si le certificat est révoqué APRÈS T, la signature reste
+  valide (la révocation n'est pas rétroactive)
+
+**Utilité** : toute signature qui doit durer plus de quelques jours.
+**Strict minimum légal** pour une signature électronique avancée
+au sens d'eIDAS.
+
+**TSA disponibles gratuitement** :
+
+* `http://timestamp.digicert.com` — gratuit, accepté universellement
+* `http://timestamp.sectigo.com`
+* `http://timestamp.globalsign.com/tsa/r6advanced1`
+* `http://timestamp.apple.com`
+* `http://ts.ssl.com`
+* `https://freetsa.org/tsr` — vraiment gratuite
+
+**TSA qualifiées eIDAS** (payantes) :
+
+* Universign (FR) — qualifiée
+* Buypass (NO) — qualifiée
+* GlobalSign Qualified TSA
+
+**Faille** : au bout de quelques années, le certificat de la TSA
+expire et les CRL/OCSP qui prouvaient la validité du certificat
+du signataire au moment T ne sont plus accessibles.
+
+**Taille** : 10-15 Ko (overhead +5 Ko vs B-B).
+
+=== B-LT (Baseline Long-Term Validation) — l'auto-suffisance
+
+[source]
+----
+PDF
+├── /Sig
+│   └── [tout B-T]
+└── /DSS  ← Document Security Store
+    ├── Certs[] : tous les certificats des chaînes (signataire + TSA + CAs)
+    ├── CRLs[]  : Certificate Revocation Lists au moment de la signature
+    ├── OCSPs[] : OCSP responses au moment de la signature
+    └── /VRI    : Validation-Related Information (mappage hash signature → matériel)
+----
+
+Mécanisme : on embarque dans le PDF **tout le matériel
+cryptographique** nécessaire à la vérification — TOUS les
+certificats des chaînes, ET les preuves de non-révocation au
+moment de la signature (CRL ou OCSP). Le PDF devient **autonome**.
+
+**Garanties supplémentaires** :
+
+* ✅ Vérification **hors-ligne**, sans accès aux CAs ou aux
+  serveurs OCSP/CRL
+* ✅ Même si demain le CA disparaît, la preuve archivée suffit
+  à confirmer que le certificat était valide à T
+
+**Utilité** : signatures qui doivent rester vérifiables 5-10 ans
+(rapports d'audit, contrats, dossiers réglementaires courants).
+
+**Faille** : les CRL/OCSP sont elles-mêmes signées par des
+certificats qui finissent par expirer. Au bout de 10-15 ans, même
+le matériel embarqué perd sa valeur cryptographique.
+
+**Taille** : 30-50 Ko (peut grimper à 100 Ko+ selon profondeur
+des chaînes et nombre de CRLs).
+
+=== B-LTA (Baseline Long-Term with Archive) — l'extension indéfinie
+
+[source]
+----
+PDF
+├── /Sig [tout B-LT]
+├── /DSS [tout B-LT]
+└── /Sig (incremental update) ← Archive Timestamp #1
+    ├── Hash de TOUT ce qui précède (PDF + signature + DSS)
+    └── Timestamp de la TSA
+        + (plus tard, avant expiration)
+        Archive Timestamp #2 ← couvre #1
+        Archive Timestamp #3 ← couvre #2
+        ...
+----
+
+Mécanisme : on rajoute un **horodatage d'archive** qui couvre
+**l'ensemble** — le PDF, la signature B-LT, le DSS. Via un
+*incremental update* PDF (pas de réécriture du fichier), on peut
+**enchaîner** ces archive-timestamps : avant que le certificat de
+la TSA d'archivage expire (typiquement 10 ans), on en ajoute un
+nouveau qui couvre tout le précédent.
+
+**Garanties supplémentaires** :
+
+* ✅ Validité de la signature **renouvelable indéfiniment**
+* ✅ Même si tous les certificats originaux ont expiré et les CAs
+  disparu, la chaîne d'archive-timestamps prouve que tout était
+  valide à un moment donné, validé récemment par une TSA encore
+  active
+
+**Obligatoire pour** :
+
+* eIDAS (signatures électroniques **qualifiées** dans l'UE)
+* Documents notariés (durée de conservation > certificat)
+* Archives légales (santé, finance, propriété intellectuelle,
+  registres officiels)
+* Tout document à valeur probante long-terme (ISO 14641
+  « archivage électronique fiable »)
+
+**Mécanisme de renouvellement** : un script *cron* qui passe
+1 fois par an sur les archives, vérifie l'expiration des
+archive-timestamps, et en ajoute un nouveau quand nécessaire.
+C'est ce que font les coffres-forts électroniques certifiés
+(DocuSign Vault, ARK, etc.).
+
+**Taille** : 50 Ko initial + ~10-15 Ko par archive-timestamp
+ajouté au fil du temps.
+
+=== Tableau de choix par cas d'usage
+
+[cols="3,1,3",options="header"]
+|===
+| Cas d'usage
+| Niveau
+| Pourquoi
+
+| Livret de partitions distribué à des choristes
+| ❌
+| Pas d'enjeu juridique. Permissions PDF (`-p print`) suffisent.
+
+| Rapport d'audit ISO 27001 envoyé à un certificateur
+| **B-T**
+| Preuve de date suffisante pour la durée d'instruction (qq mois).
+
+| Politique de sécurité / charte signée à conserver
+| **B-LT**
+| 5 ans minimum, peut survivre au départ du DSI.
+
+| Engagement contractuel client (SaaS, RGPD)
+| **B-LTA**
+| Conservation 10 ans+ requise par RGPD pour les preuves de consentement.
+
+| Signature qualifiée eIDAS (équivalent signature manuscrite)
+| **B-LTA + cert qualifié + HSM**
+| Réglementaire UE. Nécessite prestataire qualifié (TSP).
+|===
+
+== Time-Stamping Authority (TSA) — analyse
+
+=== Ce qu'est techniquement une TSA
+
+Un service **HTTP RFC 3161** qui :
+
+. Reçoit un hash (POST `application/timestamp-query`)
+. L'horodate avec son horloge interne
+. Signe `{hash, date, nonce}` avec sa clé privée
+. Retourne un *Time-Stamp Token* PKCS#7 (`application/timestamp-reply`)
+
+Service **simple en surface**. La complexité est dans tout ce qui
+l'entoure pour que le token soit *opposable*.
+
+=== Stack technique minimale
+
+==== Logiciel
+
+[cols="1,1,2",options="header"]
+|===
+| Solution | Type | Note
+| **OpenSSL `ts`** | CLI | Built-in, parfait pour des tests, stateless
+| **uts-server** (C) | Serveur HTTP RFC 3161 | Petit, prod-ready, conteneurisable
+| **EJBCA** (Java, PrimeKey) | PKI complète + TSA | Open source, utilisé par les TSAs qualifiées
+| **Dogtag** (Java, Red Hat) | PKI complète | Pas de TSA native (besoin module supp.)
+| **Microsoft Time Stamp Service** | Win Server + AD CS | Si déjà dans cet écosystème
+| **Ascertia ADSS** | Commercial | Solution clé en main pour qualifiée
+|===
+
+==== Frontal HTTP
+
+Reverse proxy classique (Nginx / Caddy) avec TLS, idéalement
+protégé par un WAF. La TLS du frontal est **distincte** du
+certificat de signature TSA — c'est juste pour transporter la
+requête HTTP en clair sur un canal chiffré.
+
+==== Source de temps — point critique
+
+Une TSA dont l'horloge dérive de 5 secondes signe des dates
+fausses → tout le service perd sa valeur :
+
+* **NTP** synchronisé à plusieurs stratum-1 (au moins 3 sources)
+* Pour qualifié eIDAS : **horloge GPS** ou référence atomique en
+  local + monitoring de dérive (< 1 seconde)
+* Logs de synchronisation NTP archivés
+
+=== Contraintes cryptographiques
+
+==== Le certificat TSA est très spécifique
+
+Pas n'importe quel certificat X.509. Doit avoir :
+
+[source]
+----
+X509v3 Extended Key Usage: critical
+    Time Stamping (1.3.6.1.5.5.7.3.8)
+----
+
+Plus précisément :
+
+* `id-kp-timeStamping` **obligatoire** et **marqué critical**
+* **Aucun autre EKU** autorisé (RFC 3628)
+* Signé par un CA dont la racine est dans le trust store des
+  vérificateurs (Adobe, Acrobat, Microsoft, openssl `-CAfile`…)
+
+**Conséquence** : ce n'est pas un cert SSL Let's Encrypt qui
+marche.
+
+[cols="1,1,1",options="header"]
+|===
+| Source du cert TSA | Reconnaissance | Coût
+| CA auto-signée maison | Vos propres machines uniquement | 0 €
+| CA auto-signée + déploiement trust store interne | Toute votre flotte | 0 € + temps OPS
+| CA publique (DigiCert, GlobalSign, Sectigo) avec produit *Document Signing TSA* | Universelle | 1500-3000 €/an
+| CA qualifiée eIDAS sur la TSL européenne | Valeur juridique UE | 5000-15000 €/an + audits
+|===
+
+==== HSM — recommandé/obligatoire
+
+Stockage de la clé privée TSA :
+
+* **Usage interne** : clé fichier chiffrée, ou SoftHSM2 (logiciel). OK.
+* **Production publique** : HSM matériel niveau FIPS 140-2 Level 2
+  minimum (~10-30k€). Cloud HSM (AWS CloudHSM ~1500€/mois, Azure
+  Dedicated HSM, GCP Cloud HSM) acceptable.
+* **TSA qualifiée eIDAS** : HSM **FIPS 140-2 Level 3** ou **CC EAL4+**
+  **obligatoire** (règlement).
+
+=== Contraintes opérationnelles
+
+* **Journal d'audit** tamper-evident, rétention 7+ ans (qualifié)
+* **Sauvegarde** clé HSM (key wrap ou Shamir) + multi-site +
+  procédures testées
+* **Monitoring** : disponibilité 99,9 %, temps réponse < 1s,
+  alerting dérive horloge
+* **Politiques publiques** : TPS (TSA Practice Statement), TSP
+  (Time-Stamp Policy), privacy
+
+=== Trois niveaux de mise en place
+
+==== 1. TSA interne (non-publique)
+
+[source]
+----
+[client PDF] → [Nginx HTTPS] → [uts-server Docker] → [OpenSSL + clé fichier]
+                                       ↑
+                                  [NTP public stratum 2]
+----
+
+* CA et TSA cert **auto-signés**
+* Cert TSA déployé sur les machines clientes (trust store)
+* Logs fichier append-only
+
+**Effort** : 1-2 jours sysadmin compétent.
+**Coût** : ressources serveur uniquement.
+**Limites** : reconnu seulement par votre flotte. Aucune valeur
+externe.
+
+==== 2. TSA publique non-qualifiée
+
+Stack : EJBCA ou Ascertia, HSM cloud, audit log signé, NTP avec
+monitoring, ISO 27001 *lite*, cert TSA depuis CA publique.
+
+**Effort** : 2-4 semaines.
+**Coût** : 5-15 k€/an.
+**Reconnaissance** : par les outils qui acceptent votre CA dans
+leur trust store. **Adobe AATL** = liste blanche acceptée par
+Acrobat (admission par audit + ~10 k€ frais).
+
+==== 3. TSA qualifiée eIDAS
+
+Stack : EJBCA + HSM FIPS 140-2 L3, horloge GPS, SOC dédié,
+conformité **ETSI EN 319 421 + 422**, audit ETSI annuel par CAB,
+inscription **TSL** européenne.
+
+**Effort** : 6-12 mois pour la mise en service initiale.
+**Coût initial** : 100-500 k€.
+**Coût récurrent** : 50-200 k€/an.
+**Reconnaissance** : Acrobat, Foxit, tous outils PAdES, valeur
+juridique opposable UE.
+
+== Sigstore — la nouvelle approche
+
+=== Le modèle Sigstore (Linux Foundation, 2021)
+
+[source]
+----
+[Développeur] → OIDC (Google/GitHub) → Fulcio (CA éphémère)
+                                            ↓
+                                       certificat 10 min
+                                            ↓
+                                  signe l'artefact + Rekor (log transparent)
+----
+
+Idée : pas de CA traditionnelle ; chaque signature utilise un
+**certificat éphémère** lié à une identité OIDC, et la trace est
+dans un **log transparent immuable** (Rekor). Vérifiable par
+tout le monde via la combinaison certificat + entrée Rekor.
+
+**Avantages** :
+
+* Pas d'HSM à gérer (clé privée éphémère)
+* Identité fédérée (Google/GitHub/etc.)
+* Log transparent (Certificate Transparency-like)
+* Soutenu par Red Hat, Google, GitHub
+* Adopté par Kubernetes, npm, PyPI
+
+**Limites pour PDF** :
+
+* Sigstore n'est **pas dans le périmètre PAdES**
+* Pour signer des PDFs, il faut toujours du PKCS#7 classique
+* La philosophie peut inspirer une « infra de confiance pour le
+  code Crystal » sans CA propriétaire
+
+=== Application possible : Sigstore-like pour le Crystal francophone
+
+Idée originale, à l'échelle ALOLI, utile à la communauté que vous
+fédérez (`crystal-beryl`, `crystal-asciidoctor-pdf`,
+`crystal-combine-pdf`, etc.) :
+
+* Un service de signature/horodatage des shards Crystal aloli-crystal/*
+* Identité fédérée via les comptes GitHub des contributeurs aloli
+* Log transparent simple (Merkle tree écrit dans un dépôt Git public)
+* Pas de CA traditionnelle, donc pas d'audit AATL/eIDAS à passer
+
+**Effort** : ~2-4 semaines pour un MVP.
+**Reconnaissance** : limitée à la communauté Crystal.
+**Bénéfice** : démontre une vision moderne de la confiance, en
+ligne avec votre savoir-faire Crystal.
+
+== Construire une infrastructure de confiance ALOLI
+
+=== Le parallèle CAcert et ses leçons
+
+CAcert (2002, Australie, NPO) avait un projet politique fort :
+
+* Une CA **gratuite**
+* Un modèle **Web of Trust** (assurers vérifient identité en personne)
+* Indépendance vis-à-vis des acteurs commerciaux
+
+==== Ce qui marche encore
+
+* Toujours opérationnel, racine présente dans Debian, FreeBSD ports
+* Communauté active d'assurers
+* Émet du certificat à la demande, gratuit
+
+==== Ce qui n'a jamais marché
+
+* **Refus définitif** de Mozilla en 2014 après plusieurs cycles
+  d'audit (gouvernance, pratiques, traçabilité jugées
+  insuffisantes)
+* Pas dans Microsoft Trusted Root Program
+* Pas dans Apple
+* Pas dans Adobe AATL
+* **Conséquence** : un cert CAcert en 2026 affiche « non vérifié »
+  dans 99 % des navigateurs et 100 % des lecteurs PDF
+
+==== Leçon pour ALOLI
+
+Pour qu'une infrastructure de confiance soit *utile à des tiers*,
+elle doit franchir des barrières d'audit qui ne sont pas
+négociables. CAcert a été bloquée sur des points opérationnels ;
+aujourd'hui le ticket d'entrée est plus cher encore (post-DigiNotar
+2011).
+
+Le Web of Trust seul ne convainc plus les éditeurs de trust stores.
+
+=== Les quatre composants d'une infrastructure de confiance
+
+[source]
+----
+┌────────────────────────────────────────────────────────────┐
+│  1. Autorité de certification (CA)                         │
+│     — émet les certificats X.509                           │
+│     — gère les chaînes (Root → Intermediate → End-entity)  │
+│     — exploite OCSP / CRL pour la révocation               │
+├────────────────────────────────────────────────────────────┤
+│  2. Modèle d'assurance                                     │
+│     — comment on vérifie l'identité du demandeur           │
+│     — Web of Trust (CAcert), DV/OV/EV (commercial),        │
+│       eIDAS qualifié (face-à-face notarié), DID (web3)     │
+├────────────────────────────────────────────────────────────┤
+│  3. Services horodatage (TSA, OCSP responder)              │
+│     — services en ligne signés par notre CA                │
+├────────────────────────────────────────────────────────────┤
+│  4. Trust list / inclusion                                 │
+│     — Adobe AATL pour signer des PDF                       │
+│     — Mozilla CCADB / Microsoft TRP pour le SSL web        │
+│     — Trust List eIDAS (TSL) UE pour valeur juridique      │
+└────────────────────────────────────────────────────────────┘
+----
+
+CAcert a fait 1, 2 (Web of Trust), 3 (basique). Elle a échoué
+sur **4** — et c'est ce qui la rend invisible aux yeux du grand
+public.
+
+=== Trois niveaux d'ambition réalistes pour ALOLI
+
+==== Niveau 1 — Trust ALOLI privée (6-12 mois)
+
+**Périmètre** : utile à ALOLI + clients explicites (qui acceptent
+volontairement votre CA dans leur trust store).
+
+**Mise en place** :
+
+* **Root CA offline** (clé sur HSM ou clé fichier dans coffre,
+  jamais en ligne)
+* **Intermediate CA online** (sur serveur dédié, EJBCA ou Dogtag)
+* **TSA** signée par l'intermediate
+* **OCSP responder** pour les révocations
+* **Site web** publiant CPS, CP, AIA, CRL distribution points
+* **Procédure d'enrôlement** documentée
+
+**Stack** : EJBCA Community en Docker sur FreeBSD + HSM cloud
+(AWS CloudHSM ~1500€/mois) ou SoftHSM2 + clés en mailbox encrypted
+backup + NTP + monitoring + site Crystal pour la doc.
+
+**Coût** : ~3-5 k€ setup, ~2-5 k€/an récurrent.
+
+**Reconnaissance** : seuls les clients qui ont **importé votre
+Root CA** dans leur trust store. Concrètement utile pour :
+
+* Signer les builds internes ALOLI
+* Signer les rapports d'audit ISO 27001 transmis à des clients
+  qui vous font confiance par contrat
+* TSA interne pour les artefacts CI/CD
+* Communauté Crystal francophone si vous souhaitez la fédérer
+
+C'est **exactement** où en est CAcert techniquement, **moins** la
+marque et la communauté de 20 ans.
+
+==== Niveau 2 — Reconnaissance Adobe AATL (12-24 mois en plus)
+
+**Saut qualitatif** : votre CA est dans le programme **Adobe
+Approved Trust List**. Acrobat valide automatiquement les
+signatures émises par votre CA pour TOUS ses utilisateurs (sans
+import). C'est la cible la plus accessible pour un acteur PDF.
+
+**Conditions** (https://helpx.adobe.com/acrobat/kb/aatl.html) :
+
+* Audit **WebTrust for CAs** ou **ETSI EN 319 411-1** annuel
+* Conformité **CA/Browser Forum Baseline Requirements**
+* HSM **FIPS 140-2 Level 3** minimum
+* Politique d'émission stricte
+* Site Web public conforme
+* Frais d'inscription : ~10-15 k€ initiaux + 5-10 k€/an
+
+**Effort total** : 30-80 k€ setup, 15-30 k€/an récurrent.
+
+**ROI** : à partir du moment où vous avez des clients qui paient
+pour des PDFs signés *avec votre CA*. Sinon c'est un investissement
+de présence/positionnement.
+
+**Contre-exemple** : DocuSign, GlobalSign, Sectigo, Buypass,
+IdenTrust occupent déjà ce marché. Un nouveau venu doit avoir un
+angle (sectoriel, géographique, communautaire).
+
+==== Niveau 3 — TSP qualifié eIDAS (24-60 mois en plus, 100-500 k€)
+
+**Le top de la chaîne** : votre TSA est sur la **Trusted List**
+européenne (TSL FR, publiée par l'ANSSI), vos signatures ont
+**valeur juridique opposable** dans toute l'UE, équivalentes à
+une signature manuscrite (article 25.2 du règlement eIDAS).
+
+**Conditions** :
+
+* Conformité **ETSI EN 319 401, 411-1, 411-2, 421, 422**
+* ISO 27001 **certifiée** (pas juste conforme)
+* Audits **CAB** (Conformity Assessment Body) tous les 2 ans, au minimum
+* Validation par l'**ANSSI** (en France) pour inscription sur la TSL
+* HSM **CC EAL4+** ou **FIPS 140-2 Level 3**
+* SOC 24/7 ou contractualisé avec un MSSP
+* Assurance professionnelle (typique 1-5 M€)
+* Capitalisation minimale (varie selon l'État membre)
+
+**Effort total** : 100-500 k€ setup, 50-200 k€/an récurrent,
+18-24 mois minimum entre dépôt et qualification.
+
+**Cas où ça vaut le coup** :
+
+* Votre métier *est* la fourniture de services de confiance
+  (Universign, ChamberSign, etc.)
+* Vous avez un volume client garantissant le ROI
+* Sectoriel : notariat, expertise comptable, santé, etc.
+
+== Trajectoire séquencée recommandée pour ALOLI
+
+=== Phase 0 — Maintenant (validation idée)
+
+* Coder le **client RFC 3161** dans `aloli-crystal/pdf-signature`.
+* Utilisez DigiCert / FreeTSA en attendant.
+* Signez vos premiers rapports ISO 27001 avec un cert auto-signé
+  + B-T via TSA tierce. Validez la valeur perçue par vos clients.
+
+=== Phase 1 — 2026/2027 (Sigstore-like pour Crystal francophone)
+
+* Si la communauté Crystal francophone répond, montez un
+  **mini-Sigstore** pour signer les builds aloli-crystal/*.
+* ROI immédiat, vitrine technologique, pas de risque réglementaire.
+* Continuez à **dépendre des TSA tierces** pour le PAdES.
+
+=== Phase 2 — 2027/2028 (Trust ALOLI privée — Niveau 1)
+
+* Si vos clients ISO 27001 commencent à demander
+  **« est-ce que je peux te faire confiance pour signer des trucs
+  sans qu'on passe par DocuSign ? »**, montez une CA privée + TSA
+  interne.
+* Coût modéré, valeur immédiate pour vos contrats.
+* À ce stade vous avez : signatures internes opposables aux
+  clients consentants, TSA pour vos rapports, OCSP pour vos
+  workflows.
+
+=== Phase 3 — 2028+ (Adobe AATL — Niveau 2)
+
+* Si la phase 2 a un ROI clair (clients qui paient pour vos
+  signatures, volume > 10k/an), passez l'audit WebTrust et payez
+  l'inscription Adobe AATL.
+* C'est là que CAcert s'est cassée. Avec 20 ans de recul on sait
+  quoi ne pas faire (gouvernance documentée, audit trail béton dès
+  le départ, équipe formée aux exigences CA/Browser Forum).
+
+=== Phase 4 — Si pertinent (eIDAS qualifié — Niveau 3)
+
+* Seulement si ALOLI prend un tournant *services de confiance*
+  comme métier principal.
+* À ce moment-là, demandez un budget qualif eIDAS à un investisseur ;
+  ne le supportez pas en autofinancement.
+
+== Décisions architecturales pour les shards
+
+=== Pourquoi un shard dédié `aloli-crystal/pdf-signature`
+
+Trois raisons :
+
+. **Surface API distincte** : signature ≠ chiffrement
+  conceptuellement. Mélanger les deux dans `aloli-crystal/pdf`
+  rendrait l'API confuse.
+. **Dépendances optionnelles** : tout consommateur de
+  `aloli-crystal/pdf` ne signera pas. Le shard de signature pourra
+  embarquer des dépendances OpenSSL spécifiques sans alourdir le
+  shard de base.
+. **Cycle de release différent** : la cryptographie de signature
+  évolue (PAdES B-T → B-LT → B-LTA, ECDSA, post-quantique…)
+  indépendamment du parsing PDF.
+
+=== Possible décomposition future
+
+À terme, possiblement deux shards :
+
+[cols="1,2"]
+|===
+| `aloli-crystal/pdf-signature`
+| PAdES B-B / B-T / B-LT / B-LTA. Dépend du shard `pdf` et du
+  client RFC 3161.
+
+| `aloli-crystal/timestamp`
+| Client RFC 3161 générique. Réutilisable pour signer du code
+  (JAR, OCI images), des artefacts CI, etc.
+|===
+
+Pour la v0.1 du shard `pdf-signature`, on inclut le client RFC 3161
+en interne. Quand un deuxième consommateur apparaît (ex. signer
+des shards Crystal), on l'extrait dans `aloli-crystal/timestamp`.
+
+=== Choix techniques
+
+==== OpenSSL : CLI shell-out vs bindings C
+
+* **CLI shell-out** (`openssl cms`, `openssl ts`, `openssl smime`) :
+  ✅ rapide à implémenter, ✅ zéro maintenance bindings, ❌ overhead
+  fork/exec (négligeable pour signature, pas pour vérification en
+  masse), ❌ dépendance binaire externe.
+* **Bindings C** : ✅ pas de fork, ✅ contrôle total, ❌ effort
+  important, ❌ maintenance liée aux versions OpenSSL.
+
+**Décision pour v0.1** : CLI shell-out pour PKCS#7 et RFC 3161.
+Migration vers bindings C possible en v0.2+ si profilage le justifie.
+
+==== HTTP RFC 3161
+
+* **stdlib `HTTP::Client`** suffisante. Pas besoin de dépendance
+  externe.
+
+==== Format de clé en entrée
+
+Supporter trois formats de clé/cert :
+
+* PKCS#12 (`.p12` / `.pfx`) — format courant, contient cert + clé
+  privée + chaîne dans un seul fichier
+* PEM séparés (`cert.pem` + `key.pem`) — workflow Unix classique
+* PKCS#11 (HSM) — différé v0.3+
+
+==== Pas de gestion de la clé en mémoire
+
+* La clé privée n'entre **jamais** dans l'espace mémoire Crystal.
+* On passe le chemin du fichier `.p12` à `openssl` qui le manipule
+  en interne.
+* Avantages : pas de risque de fuite par dump mémoire, pas de
+  zeroize à coder, alignement avec les pratiques sécu.
+
+==== Signing time
+
+* Toujours embarqué dans la signature PKCS#7 (`signingTime`
+  attribute).
+* B-T et au-dessus, on remplace par le timestamp TSA.
+* Pour B-B, on documente que la date est auto-déclarée et donc
+  contestable.
+
+== Référentiel et lectures
+
+=== Standards normatifs
+
+* **ISO 32000-2** : PDF 2.0, § 12.8 *Digital Signatures*
+* **RFC 5652** : CMS (Cryptographic Message Syntax)
+* **RFC 3161** : Internet X.509 Public Key Infrastructure
+  Time-Stamp Protocol (TSP)
+* **RFC 3628** : Policy Requirements for Time-Stamping Authorities
+* **ETSI EN 319 142** : PAdES Baseline
+* **ETSI EN 319 421** : Policy and Security Requirements for TSP
+  issuing Time-stamps
+* **ETSI EN 319 422** : Time-stamping protocol and time-stamp
+  token profiles
+
+=== Réglementation
+
+* **Règlement eIDAS** (UE 910/2014) — signatures électroniques
+* **eIDAS 2.0** (UE 2024/1183) — EUDI Wallet, attestations
+  qualifiées (effectif 2026)
+* **CA/Browser Forum Baseline Requirements** — pour SSL/TLS
+* **WebTrust for CAs** — programme d'audit (Canada/USA)
+
+=== Implémentations de référence
+
+* **iText** (Java) — PAdES B-B → B-LTA, référence du marché
+* **PoDoFo** (C++) — PAdES, lecture/écriture
+* **pyHanko** (Python) — PAdES complet, validation, time-stamping
+* **pdfsig** (poppler) — vérification CLI
+* **Sigstore Cosign** (Go) — modèle moderne supply chain
+* **EJBCA** (Java, PrimeKey) — PKI complète, TSA, OCSP
+
+=== TSA gratuites pour développement et production
+
+[cols="1,2,1",options="header"]
+|===
+| TSA | URL | Note
+| DigiCert | `http://timestamp.digicert.com` | Officiellement code-signing, accepté universellement
+| Sectigo | `http://timestamp.sectigo.com` | Idem
+| GlobalSign | `http://timestamp.globalsign.com/tsa/r6advanced1` | Acceptée Adobe
+| Apple | `http://timestamp.apple.com` | Pour signatures macOS / iOS
+| SSL.com | `http://ts.ssl.com` |
+| FreeTSA | `https://freetsa.org/tsr` | Vraiment gratuite, cert un peu marginal
+|===
+
+== Annexe — récapitulatif décisionnel
+
+=== Pour la version 0.1 du shard `aloli-crystal/pdf-signature`
+
+[cols="1,3",options="header"]
+|===
+| Décision | Choix
+| Niveaux PAdES couverts | **B-B uniquement** (foundation)
+| Format clé | PKCS#12 (`.p12`)
+| Crypto backend | OpenSSL CLI shell-out
+| Algorithme hash | SHA-256
+| Algorithme signature | RSA + RSA-PSS (selon le cert)
+| Mode | Incremental update (sign existing PDFs)
+| Tests | OpenSSL `cms -verify` cross-check
+| API publique | `PDF::Signature::Signer.sign(input, output, options)`
+|===
+
+=== Pour la version 0.2 (B-T ajouté)
+
+[cols="1,3",options="header"]
+|===
+| Décision | Choix
+| Client RFC 3161 | Stdlib `HTTP::Client`
+| TSA par défaut | DigiCert (configurable)
+| Authentication TSA | None (B-T) / HTTP Basic (TSA payantes)
+| Embedding | Unsigned attribute du SignerInfo PKCS#7
+|===
+
+=== Pour 0.3+ (B-LT, B-LTA, vérification, HSM)
+
+À planifier après retour d'expérience sur 0.1 et 0.2.
+
+== Glossaire
+
+[cols="1,4",options="header"]
+|===
+| Terme | Définition
+
+| AATL
+| Adobe Approved Trust List — liste blanche de CAs acceptées par Acrobat sans import manuel
+
+| CA
+| Certificate Authority — autorité émettrice de certificats X.509
+
+| CAdES
+| CMS Advanced Electronic Signatures — surcouche d'attributs de signature pour CMS (RFC 5126)
+
+| CMS
+| Cryptographic Message Syntax — format générique de signature (RFC 5652)
+
+| CCADB
+| Common CA Database — base partagée Mozilla / Microsoft / Apple pour gérer les trust stores
+
+| CRL
+| Certificate Revocation List — liste signée par la CA des certificats révoqués
+
+| DSS
+| Document Security Store — section PDF dédiée au matériel de validation (B-LT+)
+
+| eIDAS
+| Règlement européen sur les services de confiance (UE 910/2014, révisé 2024)
+
+| HSM
+| Hardware Security Module — boîtier crypto inviolable pour stocker les clés
+
+| OCSP
+| Online Certificate Status Protocol — vérification de révocation en ligne
+
+| PAdES
+| PDF Advanced Electronic Signatures — ETSI EN 319 142
+
+| PKCS#7
+| Format prédécesseur de CMS (RFC 2315), souvent utilisé comme synonyme de CMS
+
+| PKI
+| Public Key Infrastructure — l'ensemble : CA + politique + outils
+
+| Sigstore
+| Plateforme de signature moderne (Linux Foundation) basée sur OIDC + log transparent
+
+| TSA
+| Time-Stamping Authority — service RFC 3161 d'horodatage qualifié
+
+| TSL
+| Trust Service Status List — liste publiée par chaque État membre UE des TSPs qualifiés
+
+| TSP
+| Trust Service Provider — entité fournissant des services de confiance (signature, horodatage…)
+
+| WebTrust
+| Programme d'audit pour les CAs (Canada/USA) — équivalent ETSI EN 319 411 en Europe
+
+| X.509
+| Format standard de certificat numérique (ITU-T X.509, IETF RFC 5280)
+
+| XAdES
+| XML Advanced Electronic Signatures — surcouche pour signatures XML (ETSI EN 319 132)
+|===

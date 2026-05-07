@@ -1,0 +1,38 @@
+name: pdf-signature
+version: 0.1.0
+
+description: |
+  Pure Crystal library for PDF digital signatures (PAdES baseline
+  profiles, ETSI EN 319 142). Produces and verifies signed PDFs
+  conforming to ISO 32000-2 § 12.8.
+
+  Roadmap :
+  * v0.1 — PAdES B-B (basic detached PKCS#7 signature)
+  * v0.2 — PAdES B-T (RFC 3161 timestamping)
+  * v0.3 — PAdES B-LT (long-term validation material via /DSS)
+  * v0.4 — PAdES B-LTA (archive timestamping for indefinite extension)
+  * v0.5 — Verification side
+  * v0.6+ — HSM / PKCS#11 backend
+
+  Companion to `aloli-crystal/pdf` v0.5.x which already provides
+  encryption (RC4/AES) and document parsing/writing. See
+  `doc/RATIONALE.adoc` for the full design rationale, including
+  the trade-offs between PAdES levels, TSA infrastructure options,
+  and the Sigstore-like alternative.
+
+authors:
+  - Philippe Nénert <philippe@aloli.fr>
+
+crystal: ">= 1.10.0"
+
+license: MIT
+
+dependencies:
+  pdf:
+    github: aloli-crystal/pdf
+    version: "~> 0.5"
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
+    version: "~> 1.6"

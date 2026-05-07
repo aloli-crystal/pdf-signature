@@ -1,0 +1,57 @@
+= Changelog
+:toc: left
+:toc-title: Versions
+
+All notable changes to `aloli-crystal/pdf-signature` are documented
+here. The format follows
+https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
+follows https://semver.org/[SemVer].
+
+== v0.1.0 — 2026-05-07
+
+**Shard creation and initial skeleton.** The shard is set up,
+foundations are written, PAdES B-B implementation will land in
+a subsequent 0.1.x release.
+
+=== Added
+
+* `doc/RATIONALE.adoc` (in French) — consolidated reference
+  document covering digital signature principles, the 4 PAdES
+  levels (B-B / B-T / B-LT / B-LTA), TSA construction (internal,
+  public, eIDAS qualified), the Sigstore model and its potential
+  application to French-speaking Crystal community, and the
+  sequenced ALOLI trajectory toward a trust infrastructure.
+
+* Crystal shard skeleton: `shard.yml`, `README.{adoc,fr.adoc}`,
+  `CHANGELOG.{adoc,fr.adoc}`, `LICENSE` (MIT), `.gitignore`,
+  `.editorconfig`.
+
+* `PDF::Signature` module with its version and a `Signer.sign`
+  entry-point (stub) that raises `NotImplementedError` until the
+  B-B implementation ships.
+
+* Minimal spec suite that passes (at least the version).
+
+* Dependency on `aloli-crystal/pdf` ≥ 0.5 (PDF object model,
+  parser, writer).
+
+=== Immediate roadmap
+
+* `v0.1.x` — PAdES B-B implementation:
++
+--
+** `PDF::Signature::SigDict` — build the `/Sig` dictionary with
+   placeholders for `/Contents` and `/ByteRange`
+** `PDF::Signature::ByteRange` — compute `/ByteRange` after PDF
+   serialization
+** `PDF::Signature::PKCS7` — OpenSSL CLI wrapper
+   (`openssl cms -sign`) for detached signing
+** `PDF::Signature::Signer` — full orchestration (incremental
+   update, signature embedding, ByteRange patching)
+** Round-trip tests: produced signature → verified by
+   `openssl cms -verify` and `pdfsig` (poppler).
+--
+
+* `v0.2` — PAdES B-T (RFC 3161 client, timestamp integration in
+  PKCS#7 unsigned attribute)
+--

@@ -1,0 +1,58 @@
+= Changelog
+:toc: left
+:toc-title: Versions
+
+Toutes les modifications notables de `aloli-crystal/pdf-signature`
+sont documentées ici. Le format suit
+https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
+versioning suit https://semver.org/[SemVer].
+
+== v0.1.0 — 2026-05-07
+
+**Création du shard et squelette initial.** Le shard est posé,
+les fondations sont écrites, l'implémentation PAdES B-B sera
+livrée dans une version 0.1.x suivante.
+
+=== Added
+
+* `doc/RATIONALE.adoc` — document de référence consolidé
+  couvrant les principes des signatures numériques, les 4 niveaux
+  PAdES (B-B / B-T / B-LT / B-LTA), la construction d'une TSA
+  (interne, publique, qualifiée eIDAS), le modèle Sigstore et
+  son application possible au monde Crystal francophone, et la
+  trajectoire séquencée pour ALOLI vers une infrastructure de
+  confiance.
+
+* Squelette de shard Crystal : `shard.yml`, `README.{adoc,fr.adoc}`,
+  `CHANGELOG.{adoc,fr.adoc}`, `LICENSE` (MIT), `.gitignore`,
+  `.editorconfig`.
+
+* Module `PDF::Signature` avec sa version et un point d'entrée
+  `Signer.sign` (stub) qui lèvera `NotImplementedError` jusqu'à la
+  livraison de l'implémentation B-B.
+
+* Une suite de specs minimale qui passe (au moins la version).
+
+* Dépendance sur `aloli-crystal/pdf` ≥ 0.5 (modèle objet PDF,
+  parser, écriture).
+
+=== Roadmap immédiate
+
+* `v0.1.x` — implémentation PAdES B-B :
++
+--
+** `PDF::Signature::SigDict` — construction du dictionnaire `/Sig`
+   avec placeholders pour `/Contents` et `/ByteRange`
+** `PDF::Signature::ByteRange` — calcul du `/ByteRange` après
+   sérialisation PDF
+** `PDF::Signature::PKCS7` — wrapper OpenSSL CLI (`openssl cms -sign`)
+   pour la signature détachée
+** `PDF::Signature::Signer` — orchestration complète (incremental
+   update, embedding signature, patching ByteRange)
+** Tests round-trip : signature produite → vérifiée par
+   `openssl cms -verify` et `pdfsig` (poppler).
+--
+
+* `v0.2` — PAdES B-T (client RFC 3161, intégration timestamp dans
+  l'attribut non-signé du PKCS#7)
+--
