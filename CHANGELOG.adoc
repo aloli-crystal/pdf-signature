@@ -7,6 +7,42 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.4.0 — 2026-06-04 — PAdES B-LTA (horodatage d'archive)
+
+=== Added
+
+* **`PDF::Signature::DocTimeStamp` — horodatage de document (ISO 32000-2
+  § 12.8.5).** `DocTimeStamp.add` ajoute un dict `/Type /DocTimeStamp`
+  `/SubFilter /ETSI.RFC3161` dont le `/Contents` est un **jeton RFC 3161
+  brut** (pas un CMS) couvrant **tout le document** — signature et `/DSS`
+  compris. Posé via un nouvel incremental update : un champ de signature
+  supplémentaire (`/V` → DocTimeStamp) ajouté à l'`/AcroForm /Fields` et
+  aux `/Annots` de la page. Le `/ByteRange` couvre tout sauf le trou
+  `/Contents` du jeton.
+* **`Signer.sign(level: :b_lta, …)`** — produit une signature B-LT puis
+  scelle l'ensemble par un horodatage d'archive. Tous les niveaux PAdES
+  baseline (B-B → B-T → B-LT → B-LTA) sont désormais disponibles.
+* **`ByteRange.compute(bytes, contents_size, from:)`** — paramètre `from`
+  pour viser le `/Contents` du DocTimeStamp (le document contient
+  désormais plusieurs trous `/Contents` de même taille).
+
+=== Validation
+
+PDF B-LTA **validé par `pdfsig` (poppler)** : deux signatures détectées
+— la signature CAdES (« Signature is Valid ») et le **DocTimeStamp**
+(`Timestamp1`) dont les *Signed Ranges* couvrent **tout le document**
+(« Total document signed »). Le jeton d'archive est par ailleurs vérifié
+par `openssl ts -verify` (contre la CA de la TSA) sur les octets du
+`/ByteRange`. Specs hermétiques (PKI locale + TSA RFC 3161 locale),
+4 révisions incrémentales. 40 specs, ameba 0.
+
+=== Known limitations
+
+* L'enrichissement *récursif* du `/DSS` avec le matériel de validation
+  propre à la TSA d'archive (pour re-valider l'horodatage lui-même à très
+  long terme) n'est pas encore automatisé — le jeton embarque toutefois
+  le certificat de la TSA (option `-cert`), donc il reste auto-portant.
+
 == v0.3.0 — 2026-06-04 — PAdES B-LT (/DSS, matériel de validation)
 
 === Added

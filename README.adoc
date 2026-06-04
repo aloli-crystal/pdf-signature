@@ -58,7 +58,7 @@ deserves its own shard because:
 
 | v0.4
 | PAdES B-LTA (archive timestamping — indefinite extension)
-| 📋 planned
+| ✅ done
 
 | v0.5
 | Verification (reading + validation)

@@ -69,13 +69,6 @@ module PDF
                 raise SignatureError.new("Niveau de signature inconnu : #{level.inspect} (attendu :b_b, :b_t, :b_lt, :b_lta)")
               end
 
-        if lvl.b_lta?
-          raise NotImplementedError.new(
-            "Le niveau #{level} sera disponible dans une version future " \
-            "(B-LTA en v0.4). Cf. README.adoc § Roadmap."
-          )
-        end
-
         opts = Options.new(
           certificate: certificate,
           passphrase: passphrase,
@@ -96,10 +89,28 @@ module PDF
           ltv_ocsps: ltv_ocsps,
         )
 
-        if lvl.b_lt?
-          sign_long_term(input, output, opts)
-        else
-          sign_with_options(input, output, opts)
+        case
+        when lvl.b_lta? then sign_long_term_archive(input, output, opts)
+        when lvl.b_lt?  then sign_long_term(input, output, opts)
+        else                 sign_with_options(input, output, opts)
+        end
+      end
+
+      # PAdES **B-LTA** : produce a B-LT signature (B-T + `/DSS`), then
+      # append a document timestamp (`/DocTimeStamp`) sealing the whole
+      # document — validation material included — in trusted time.
+      def self.sign_long_term_archive(input : String, output : String, options : Options) : Nil
+        tsa = options.tsa_url
+        raise SignatureError.new("B-LTA exige une TSA (tsa_url).") unless tsa
+        tmp = File.tempname("pdf-signature-blt", ".pdf")
+        begin
+          b_lt = options.dup
+          b_lt.level = Level::B_LT
+          sign_long_term(input, tmp, b_lt)
+          DocTimeStamp.add(tmp, output, tsa, options.tsa_digest_algorithm,
+            options.tsa_username, options.tsa_password, options.contents_size)
+        ensure
+          File.delete(tmp) if File.exists?(tmp)
         end
       end
 

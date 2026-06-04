@@ -58,7 +58,7 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 
 | v0.4
 | PAdES B-LTA (horodatage d'archive — extension indéfinie)
-| 📋 prévu
+| ✅ fait
 
 | v0.5
 | Vérification (lecture + validation)

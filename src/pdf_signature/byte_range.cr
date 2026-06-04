@@ -32,7 +32,12 @@ module PDF
       # positifs (`/Contents` peut apparaître dans un commentaire, etc.).
       # Heuristique : on cherche la séquence `/Contents` suivie d'un
       # `<` dans les 64 octets qui suivent (typique pour un dict PDF).
-      def self.compute(bytes : ::Bytes, contents_size : Int32) : Tuple(Int32, Int32, Int32, Int32)
+      # `from` lets the caller skip earlier `/Contents` holes — needed for
+      # a document timestamp (PAdES B-LTA), whose `/Contents` is appended
+      # after an already-present signature `/Contents` of the same size :
+      # pass the byte offset of the DocTimeStamp object so the scan lands
+      # on the right one.
+      def self.compute(bytes : ::Bytes, contents_size : Int32, from : Int32 = 0) : Tuple(Int32, Int32, Int32, Int32)
         contents_marker = "/Contents".to_slice
         expected_hex = contents_size * 2
 
@@ -41,7 +46,6 @@ module PDF
         # the reserved size : scan every `/Contents`, skip whitespace, and
         # accept the one immediately followed by a single `<` whose
         # matching `>` sits exactly `contents_size*2` bytes later.
-        from = 0
         loop do
           idx = find_subsequence(bytes, contents_marker, from)
           raise SignatureError.new("/Contents hexadécimal du /Sig introuvable — la signature n'a pas été insérée correctement.") if idx < 0

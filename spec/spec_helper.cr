@@ -170,6 +170,23 @@ module SpecHelper
     {signed, full[0, der_length(full)]}
   end
 
+  # Like `extract_signature` but targets the **last** signature field
+  # in the file (its `/ByteRange` is the last one) — used to recover a
+  # document timestamp's ranged bytes and bare RFC 3161 token (B-LTA).
+  def self.extract_last_signature(bytes : ::Bytes) : Tuple(::Bytes, ::Bytes)
+    text = String.new(bytes)
+    idx = text.rindex("/ByteRange")
+    raise "ByteRange introuvable" unless idx
+    open = text.index!('[', idx)
+    close = text.index!(']', open)
+    o1, l1, o2, l2 = text[(open + 1)...close].split.map(&.to_i)
+    ranged = ::Bytes.new(l1 + l2)
+    bytes[o1, l1].copy_to(ranged[0, l1])
+    bytes[o2, l2].copy_to(ranged[l1, l2])
+    full = String.new(bytes[l1, o2 - l1]).hexbytes
+    {ranged, full[0, der_length(full)]}
+  end
+
   # Provisions a hermetic LTV chain for PAdES B-LT tests : a local CA, a
   # signer PKCS#12 issued by it (with AIA/CDP extensions), an OCSP
   # response (generated offline by the CA acting as responder) and a CRL.
