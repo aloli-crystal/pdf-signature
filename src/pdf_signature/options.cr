@@ -43,6 +43,18 @@ module PDF
       # depuis 2017, exclu par la plupart des trust stores).
       property digest_algorithm : String
 
+      # URL de la TSA (RFC 3161) à interroger pour l'horodatage de la
+      # signature. Requise dès le niveau B-T ; ignorée en B-B.
+      property tsa_url : String?
+
+      # Algorithme de hash de l'empreinte RFC 3161 (message imprint)
+      # envoyée à la TSA. Indépendant de `digest_algorithm`.
+      property tsa_digest_algorithm : String
+
+      # Identifiants HTTP Basic pour les TSA protégées (optionnels).
+      property tsa_username : String?
+      property tsa_password : String?
+
       def initialize(
         @certificate : String,
         @passphrase : String = "",
@@ -54,6 +66,10 @@ module PDF
         @signing_time : Time = Time.utc,
         @contents_size : Int32 = 16384,
         @digest_algorithm : String = "sha256",
+        @tsa_url : String? = nil,
+        @tsa_digest_algorithm : String = "sha256",
+        @tsa_username : String? = nil,
+        @tsa_password : String? = nil,
       )
         validate!
       end
@@ -67,6 +83,12 @@ module PDF
         end
         unless ["sha256", "sha384", "sha512"].includes?(@digest_algorithm.downcase)
           raise SignatureError.new("digest_algorithm doit être sha256, sha384 ou sha512 (#{@digest_algorithm.inspect} fourni). SHA-1 est refusé.")
+        end
+        unless ["sha256", "sha384", "sha512"].includes?(@tsa_digest_algorithm.downcase)
+          raise SignatureError.new("tsa_digest_algorithm doit être sha256, sha384 ou sha512 (#{@tsa_digest_algorithm.inspect} fourni).")
+        end
+        if @level.b_t? && @tsa_url.nil?
+          raise SignatureError.new("Le niveau B-T exige une TSA : renseignez `tsa_url` (URL d'un service RFC 3161).")
         end
       end
     end

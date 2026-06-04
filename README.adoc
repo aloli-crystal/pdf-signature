@@ -46,11 +46,11 @@ deserves its own shard because:
 
 | v0.1
 | PAdES B-B (basic detached PKCS#7 signature)
-| 🚧 in progress
+| ✅ done
 
 | v0.2
 | PAdES B-T (RFC 3161 timestamping)
-| 📋 planned
+| ✅ done
 
 | v0.3
 | PAdES B-LT (long-term validation material via `/DSS`)
@@ -69,24 +69,41 @@ deserves its own shard because:
 | 💭 idea
 |===
 
-== Quickstart (coming, v0.1 in progress)
+== Quickstart
 
 [source,crystal]
 ----
 require "pdf-signature"
 
-# Sign an existing PDF (incremental update)
+# B-B — sign an existing PDF (incremental update)
 PDF::Signature::Signer.sign(
   input:  "report.pdf",
   output: "signed-report.pdf",
   certificate: "./signer.p12",
   passphrase: "...",       # or via env / Keychain
-  level: :b_b,             # :b_b | :b_t | :b_lt | :b_lta (future)
+  level: :b_b,             # :b_b | :b_t (done) | :b_lt | :b_lta (future)
   reason: "ISO 27001 audit validation",
   location: "Laguiole, FR",
   signing_time: Time.utc,
 )
+
+# B-T — add an RFC 3161 signature timestamp from a TSA
+PDF::Signature::Signer.sign(
+  input:  "report.pdf",
+  output: "signed-report.pdf",
+  certificate: "./signer.p12",
+  passphrase: "...",
+  level: :b_t,
+  tsa_url: "https://freetsa.org/tsr",   # any RFC 3161 service
+  reason: "ISO 27001 audit validation",
+)
 ----
+
+NOTE: B-T requires the `openssl` CLI (≥ 3.0, for `cms -cades`) on the
+`PATH`. The signature is a CAdES-BES detached envelope (ESS
+`signing-certificate-v2`) with the timestamp embedded as the
+`id-aa-timeStampToken` unsigned attribute, validated against `openssl
+cms`, `openssl ts` and poppler's `pdfsig`.
 
 == PAdES levels — summary
 

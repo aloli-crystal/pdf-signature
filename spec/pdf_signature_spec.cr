@@ -205,10 +205,23 @@ describe PDF::Signature::PKCS7 do
 end
 
 describe PDF::Signature::Signer do
-  it "lève NotImplementedError sur les niveaux non encore livrés" do
+  it "lève NotImplementedError sur les niveaux non encore livrés (B-LT/B-LTA)" do
     pdf_path = File.join(SpecHelper::TMP_DIR, "src-signer.pdf")
     SpecHelper.write_minimal_pdf(pdf_path)
-    expect_raises(PDF::Signature::NotImplementedError, /B-T en v0\.2/) do
+    expect_raises(PDF::Signature::NotImplementedError, /B-LT en v0\.3/) do
+      PDF::Signature::Signer.sign(
+        input: pdf_path,
+        output: "/tmp/out.pdf",
+        certificate: pdf_path,
+        level: :b_lt,
+      )
+    end
+  end
+
+  it "lève SignatureError si B-T est demandé sans TSA" do
+    pdf_path = File.join(SpecHelper::TMP_DIR, "src-signer-bt-no-tsa.pdf")
+    SpecHelper.write_minimal_pdf(pdf_path)
+    expect_raises(PDF::Signature::SignatureError, /B-T exige une TSA/) do
       PDF::Signature::Signer.sign(
         input: pdf_path,
         output: "/tmp/out.pdf",

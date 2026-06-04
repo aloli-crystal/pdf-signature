@@ -2,8 +2,10 @@ require "pdf"
 
 require "./pdf_signature/version"
 require "./pdf_signature/options"
+require "./pdf_signature/asn1"
 require "./pdf_signature/sig_dict"
 require "./pdf_signature/byte_range"
+require "./pdf_signature/tsa"
 require "./pdf_signature/pkcs7"
 require "./pdf_signature/signer"
 

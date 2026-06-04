@@ -7,6 +7,55 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.2.0 — 2026-06-04 — PAdES B-T (horodatage RFC 3161)
+
+=== Ajouté
+
+* **`PDF::Signature::ASN1` — lecteur/écrivain d'arbre DER minimal.** Juste
+  assez d'ASN.1 (forme à tag court, longueur définie, ré-encodage
+  canonique) pour faire la chirurgie qu'exige B-T : analyser le CMS
+  détaché produit par `openssl cms`, localiser le `SignerInfo`, lire sa
+  valeur de signature et y greffer un attribut non-signé. Ré-encodage
+  octet-pour-octet d'un nœud inchangé (DER canonique) — la branche
+  signée n'est jamais perturbée. Fondation réutilisée par la v0.4 (/DSS)
+  et la v0.5 (vérification).
+* **`PDF::Signature::TSA` — client RFC 3161.** Construit le `TimeStampReq`,
+  le POST en HTTP (`application/timestamp-query`), récupère le
+  `TimeStampToken` et le vérifie — via `openssl ts` (même choix de
+  shell-out CLI que `PKCS7`), seul le transport HTTP étant en Crystal.
+  Authentification HTTP Basic optionnelle.
+* **`PKCS7.sign_with_timestamp`** — signe (CAdES-BES, cf. ci-dessous)
+  puis horodate : le jeton RFC 3161 est calculé sur la valeur de
+  signature du `SignerInfo` (ETSI EN 319 122 § 5.2.3) et greffé comme
+  attribut non-signé `id-aa-timeStampToken` (1.2.840.113549.1.9.16.2.14).
+  Ajouts utilitaires : `signature_value`, `embed_timestamp_token`,
+  `timestamp_token` (relecture du jeton embarqué).
+* **CAdES-BES via `openssl cms -sign -cades`.** Le chemin CAdES ajoute
+  l'attribut signé ESS `signing-certificate-v2` (RFC 5035), exigé par le
+  SubFilter `ETSI.CAdES.detached`. Sans lui, un validateur CAdES
+  (`pdfsig` de poppler) rejette la signature.
+* `Options` accepte `tsa_url`, `tsa_digest_algorithm`,
+  `tsa_username`/`tsa_password` ; `Signer.sign(level: :b_t, tsa_url: …)`
+  produit une signature B-T. B-T sans `tsa_url` lève une `SignatureError`.
+
+=== Validation
+
+PDF B-T **validé par trois outils tiers** : `openssl cms -verify`
+(signature CAdES), `openssl ts -verify` (jeton RFC 3161 contre la CA de
+la TSA) et **`pdfsig` (poppler)** → « Signature Validation: Signature is
+Valid », type ETSI.CAdES.detached, « Total document signed ». Les specs
+montent une **TSA RFC 3161 locale et hermétique** (serveur HTTP en
+process adossé à `openssl ts -reply`) : l'échange complet est joué hors
+ligne contre un vrai `openssl` des deux côtés.
+
+=== Limitations connues
+
+* `openssl cms -cades` inclut l'attribut signé `signing-time`, que le
+  profil PAdES (ETSI EN 319 142-1 § 5.3) recommande d'omettre au profit
+  du `/M` et de l'horodatage. Écart mineur — la signature reste un
+  CAdES-BES valide. La construction native du CMS (qui permettrait de
+  l'omettre) est laissée à un palier ultérieur.
+
 == v0.1.3 — 2026-06-04 — PAdES B-B fonctionnel
 
 === Ajouté

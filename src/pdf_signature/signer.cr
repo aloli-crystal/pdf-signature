@@ -48,6 +48,10 @@ module PDF
         signing_time : Time = Time.utc,
         contents_size : Int32 = 16384,
         digest_algorithm : String = "sha256",
+        tsa_url : String? = nil,
+        tsa_digest_algorithm : String = "sha256",
+        tsa_username : String? = nil,
+        tsa_password : String? = nil,
       ) : Nil
         unless File.exists?(input)
           raise SignatureError.new("Fichier d'entrée introuvable : #{input}")
@@ -62,11 +66,10 @@ module PDF
                 raise SignatureError.new("Niveau de signature inconnu : #{level.inspect} (attendu :b_b, :b_t, :b_lt, :b_lta)")
               end
 
-        unless lvl.b_b?
+        if lvl.b_lt? || lvl.b_lta?
           raise NotImplementedError.new(
             "Le niveau #{level} sera disponible dans une version future " \
-            "(B-T en v0.2, B-LT en v0.3, B-LTA en v0.4). " \
-            "Cf. README.adoc § Roadmap."
+            "(B-LT en v0.3, B-LTA en v0.4). Cf. README.adoc § Roadmap."
           )
         end
 
@@ -81,6 +84,10 @@ module PDF
           signing_time: signing_time,
           contents_size: contents_size,
           digest_algorithm: digest_algorithm,
+          tsa_url: tsa_url,
+          tsa_digest_algorithm: tsa_digest_algorithm,
+          tsa_username: tsa_username,
+          tsa_password: tsa_password,
         )
 
         sign_with_options(input, output, opts)
@@ -199,7 +206,15 @@ module PDF
         bytes[a, b].copy_to(signed[0, b])
         bytes[c, d].copy_to(signed[b, d])
 
-        der = PKCS7.sign(signed, options.certificate, options.passphrase, options.digest_algorithm)
+        der = if (tsa = options.tsa_url) && options.level.b_t?
+                PKCS7.sign_with_timestamp(
+                  signed, options.certificate, options.passphrase, tsa,
+                  options.digest_algorithm, options.tsa_digest_algorithm,
+                  options.tsa_username, options.tsa_password,
+                )
+              else
+                PKCS7.sign(signed, options.certificate, options.passphrase, options.digest_algorithm)
+              end
         hex = der.hexstring
         capacity = options.contents_size * 2
         if hex.size > capacity

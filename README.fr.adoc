@@ -46,11 +46,11 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 
 | v0.1
 | PAdES B-B (signature de base, PKCS#7 détaché)
-| 🚧 en cours
+| ✅ fait
 
 | v0.2
 | PAdES B-T (horodatage RFC 3161)
-| 📋 prévu
+| ✅ fait
 
 | v0.3
 | PAdES B-LT (matériel de validation long-terme via `/DSS`)
@@ -69,24 +69,41 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 | 💭 idée
 |===
 
-== Démarrage rapide (à venir, v0.1 en cours)
+== Démarrage rapide
 
 [source,crystal]
 ----
 require "pdf-signature"
 
-# Signer un PDF existant (incremental update)
+# B-B — signer un PDF existant (incremental update)
 PDF::Signature::Signer.sign(
   input:  "rapport.pdf",
   output: "rapport-signe.pdf",
   certificate: "./signataire.p12",
   passphrase: "...",       # ou via env / iCloud Keychain
-  level: :b_b,             # :b_b | :b_t | :b_lt | :b_lta (futur)
+  level: :b_b,             # :b_b | :b_t (fait) | :b_lt | :b_lta (futur)
   reason: "Validation rapport ISO 27001",
   location: "Laguiole, FR",
   signing_time: Time.utc,
 )
+
+# B-T — ajouter un horodatage de signature RFC 3161 d'une TSA
+PDF::Signature::Signer.sign(
+  input:  "rapport.pdf",
+  output: "rapport-signe.pdf",
+  certificate: "./signataire.p12",
+  passphrase: "...",
+  level: :b_t,
+  tsa_url: "https://freetsa.org/tsr",   # tout service RFC 3161
+  reason: "Validation rapport ISO 27001",
+)
 ----
+
+NOTE: Le niveau B-T requiert le binaire `openssl` (≥ 3.0, pour `cms
+-cades`) dans le `PATH`. La signature est un CAdES-BES détaché (attribut
+ESS `signing-certificate-v2`) avec le jeton d'horodatage embarqué comme
+attribut non-signé `id-aa-timeStampToken`, validée par `openssl cms`,
+`openssl ts` et `pdfsig` (poppler).
 
 == Niveaux PAdES — résumé
 
