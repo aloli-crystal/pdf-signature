@@ -11,6 +11,7 @@ require "./pdf_signature/incremental"
 require "./pdf_signature/dss"
 require "./pdf_signature/doc_timestamp"
 require "./pdf_signature/signer"
+require "./pdf_signature/verifier"
 
 # Top-level namespace : PDF digital signatures (PAdES, ETSI EN 319 142).
 #

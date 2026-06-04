@@ -62,7 +62,7 @@ deserves its own shard because:
 
 | v0.5
 | Verification (reading + validation)
-| 📋 planned
+| ✅ done
 
 | v0.6+
 | HSM / PKCS#11 backend
@@ -112,6 +112,11 @@ PDF::Signature::Signer.sign(
   ltv_ocsps: ["./signer-ocsp.der"],
   ltv_crls:  ["./issuing-ca.crl"],
 )
+
+# Verify a signed PDF (one report per signature / document timestamp)
+PDF::Signature::Verifier.verify("signed-report.pdf", ca_bundle: "./trust.pem").each do |r|
+  puts "#{r.field}: #{r.level} valid=#{r.valid?} whole=#{r.covers_whole_document?}"
+end
 ----
 
 NOTE: B-T requires the `openssl` CLI (≥ 3.0, for `cms -cades`) on the

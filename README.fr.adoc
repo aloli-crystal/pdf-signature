@@ -62,7 +62,7 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 
 | v0.5
 | Vérification (lecture + validation)
-| 📋 prévu
+| ✅ fait
 
 | v0.6+
 | Backend HSM / PKCS#11
@@ -113,6 +113,11 @@ PDF::Signature::Signer.sign(
   ltv_ocsps: ["./signataire-ocsp.der"],
   ltv_crls:  ["./ca-emettrice.crl"],
 )
+
+# Vérifier un PDF signé (un rapport par signature / horodatage de document)
+PDF::Signature::Verifier.verify("rapport-signe.pdf", ca_bundle: "./confiance.pem").each do |r|
+  puts "#{r.field} : #{r.level} valide=#{r.valid?} tout=#{r.covers_whole_document?}"
+end
 ----
 
 NOTE: Le niveau B-T requiert le binaire `openssl` (≥ 3.0, pour `cms

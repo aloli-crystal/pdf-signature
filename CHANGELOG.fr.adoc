@@ -7,6 +7,36 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.5.0 — 2026-06-04 — Vérification
+
+=== Ajouté
+
+* **`PDF::Signature::Verifier` — côté lecture.** `Verifier.verify(input,
+  ca_bundle)` lit un PDF signé et renvoie un `Verifier::Report` par champ
+  de signature (signatures et horodatages de document), dans l'ordre du
+  document. Chaque rapport expose : `field`, `kind`
+  (`:signature`/`:document_timestamp`), `sub_filter`, `level`
+  (`:b_b`/`:b_t`/`:b_lt`/`:b_lta`/`:document_timestamp`/`:unknown`),
+  `valid?`, `covers_whole_document?`, `has_signature_timestamp?` et un
+  `detail`.
+* La vérification reconstruit les régions du `/ByteRange` **stocké**,
+  vérifie la cryptographie via `PKCS7.verify` (signatures CMS/CAdES) ou
+  `TSA.verify` (jetons RFC 3161 des DocTimeStamp), et **infère le niveau
+  PAdES** atteint à partir du SubFilter, de la présence d'un horodatage
+  de signature, d'un `/DSS` et d'un horodatage de document. Avec
+  `ca_bundle`, les chaînes signataire / TSA sont validées contre cet
+  ancrage de confiance ; sans lui, seules les mathématiques de signature
+  le sont.
+
+=== Validation
+
+Round-trip **sign → verify** sur les quatre niveaux : B-B
+(`covers_whole_document? == true`, pas d'horodatage), B-T (horodatage
+détecté), B-LTA (deux rapports : la signature `:b_lta` ne couvre pas tout
+le document, le DocTimeStamp `:document_timestamp` le couvre). Avec un
+bundle de confiance combiné (CA émettrice + CA de la TSA), signature et
+horodatage d'archive ressortent tous deux `valid?`. 44 specs, ameba 0.
+
 == v0.4.0 — 2026-06-04 — PAdES B-LTA (horodatage d'archive)
 
 === Ajouté
