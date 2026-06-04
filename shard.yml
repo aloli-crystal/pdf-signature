@@ -1,5 +1,5 @@
 name: pdf-signature
-version: 0.1.1
+version: 0.1.2
 
 description: |
   Pure Crystal library for PDF digital signatures (PAdES baseline

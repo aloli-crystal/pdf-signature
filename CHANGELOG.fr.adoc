@@ -7,6 +7,26 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.1.2 — 2026-06-04
+
+=== Ajouté
+
+* **`PKCS7.sign` / `PKCS7.verify`** — le cœur cryptographique de PAdES
+  B-B, implémenté via la CLI `openssl` (le choix de conception du
+  `doc/RATIONALE.adoc`). `sign` extrait le certificat feuille et la clé
+  privée du PKCS#12 (passphrase passée par variable d'environnement,
+  jamais sur la ligne de commande ; matériel PEM dans un répertoire
+  temporaire 0700 supprimé en `ensure`) et produit un CMS SignedData
+  **détaché** (`openssl cms -sign -binary -outform DER -nosmimecap
+  -md <digest>`). `verify` valide une signature détachée contre un
+  contenu fourni, éventuellement contre un bundle de CA.
+* Specs : un aller-retour (sign puis verify) avec un PKCS#12 auto-signé
+  généré à la volée, une vérification du caractère détaché (le contenu
+  signé n'est pas embarqué dans le DER), le rejet d'une altération, et
+  l'erreur PKCS#12 introuvable. La mécanique de signature (insertion
+  `/Sig`, `/ByteRange`, patch `/Contents`) arrive dans la prochaine
+  0.1.x.
+
 == v0.1.1 — 2026-05-07
 
 === Fixed

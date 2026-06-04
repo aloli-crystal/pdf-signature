@@ -174,9 +174,32 @@ describe PDF::Signature::PKCS7 do
     [true, false].includes?(result).should be_true
   end
 
-  it "lève NotImplementedError sur sign() (squelette v0.1)" do
-    expect_raises(PDF::Signature::NotImplementedError, /openssl cms.*itération/) do
-      PDF::Signature::PKCS7.sign("hello".to_slice, "/tmp/dummy.p12", "")
+  it "produit une signature CMS détachée vérifiable (round-trip)" do
+    pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
+    p12 = File.join(SpecHelper::TMP_DIR, "pkcs7.p12")
+    pending! "p12 non généré" unless SpecHelper.write_self_signed_p12(p12, "secret")
+
+    data = "Octets du ByteRange a signer".to_slice
+    der = PDF::Signature::PKCS7.sign(data, p12, "secret")
+    der.size.should be > 0
+    # Détaché : le contenu signé n'est pas embarqué dans l'enveloppe DER.
+    String.new(der).includes?("Octets du ByteRange").should be_false
+    PDF::Signature::PKCS7.verify(data, der).should be_true
+  end
+
+  it "rejette une vérification sur des données altérées" do
+    pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
+    p12 = File.join(SpecHelper::TMP_DIR, "pkcs7b.p12")
+    pending! "p12 non généré" unless SpecHelper.write_self_signed_p12(p12, "secret")
+
+    der = PDF::Signature::PKCS7.sign("original".to_slice, p12, "secret")
+    PDF::Signature::PKCS7.verify("falsifie".to_slice, der).should be_false
+  end
+
+  it "lève SignatureError si le PKCS#12 est introuvable" do
+    pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
+    expect_raises(PDF::Signature::SignatureError, /introuvable/) do
+      PDF::Signature::PKCS7.sign("x".to_slice, "/inexistant.p12", "")
     end
   end
 end
