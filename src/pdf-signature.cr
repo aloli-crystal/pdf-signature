@@ -7,6 +7,8 @@ require "./pdf_signature/sig_dict"
 require "./pdf_signature/byte_range"
 require "./pdf_signature/tsa"
 require "./pdf_signature/pkcs7"
+require "./pdf_signature/incremental"
+require "./pdf_signature/dss"
 require "./pdf_signature/signer"
 
 # Top-level namespace : PDF digital signatures (PAdES, ETSI EN 319 142).

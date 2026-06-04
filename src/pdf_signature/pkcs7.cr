@@ -151,14 +151,32 @@ module PDF
         nil
       end
 
-      # Navigates a CMS `ContentInfo` down to its single `SignerInfo`
-      # SEQUENCE :
-      # ContentInfo → `[0]` EXPLICIT → SignedData → signerInfos SET → [0].
-      private def self.signer_info_of(root : ASN1::Node) : ASN1::Node
+      # The DER bytes of every X.509 certificate carried in a CMS
+      # `certificates [0]` field — the signer's chain for a signature
+      # CMS, or the TSA's chain for an RFC 3161 token. Empty if the CMS
+      # embeds no certificates. Used to seed the PAdES B-LT `/DSS`.
+      def self.certificates(cms_der : ::Bytes) : ::Array(::Bytes)
+        signed_data = signed_data_of(ASN1.parse(cms_der))
+        field = signed_data.children.find { |child| child.tag == 0xA0_u8 }
+        return [] of ::Bytes unless field
+        # CertificateChoices : a plain X.509 cert is a SEQUENCE (0x30).
+        field.children.select { |child| child.tag == 0x30_u8 }.map(&.to_der)
+      end
+
+      # Navigates a CMS `ContentInfo` to its `SignedData` SEQUENCE :
+      # ContentInfo → `[0]` EXPLICIT → SignedData.
+      private def self.signed_data_of(root : ASN1::Node) : ASN1::Node
         explicit = root.children[1]?
         raise SignatureError.new("CMS sans contenu [0] EXPLICIT.") unless explicit && explicit.tag == 0xA0_u8
         signed_data = explicit.children[0]?
         raise SignatureError.new("CMS sans SignedData.") unless signed_data && signed_data.tag == 0x30_u8
+        signed_data
+      end
+
+      # Navigates a CMS `ContentInfo` down to its single `SignerInfo`
+      # SEQUENCE : SignedData → signerInfos SET → [0].
+      private def self.signer_info_of(root : ASN1::Node) : ASN1::Node
+        signed_data = signed_data_of(root)
         signer_infos = signed_data.children.last?
         raise SignatureError.new("SignedData sans signerInfos.") unless signer_infos && signer_infos.tag == 0x31_u8
         signer_info = signer_infos.children[0]?

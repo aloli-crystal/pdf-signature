@@ -52,6 +52,9 @@ module PDF
         tsa_digest_algorithm : String = "sha256",
         tsa_username : String? = nil,
         tsa_password : String? = nil,
+        ltv_certs : Array(String) = [] of String,
+        ltv_crls : Array(String) = [] of String,
+        ltv_ocsps : Array(String) = [] of String,
       ) : Nil
         unless File.exists?(input)
           raise SignatureError.new("Fichier d'entrée introuvable : #{input}")
@@ -66,10 +69,10 @@ module PDF
                 raise SignatureError.new("Niveau de signature inconnu : #{level.inspect} (attendu :b_b, :b_t, :b_lt, :b_lta)")
               end
 
-        if lvl.b_lt? || lvl.b_lta?
+        if lvl.b_lta?
           raise NotImplementedError.new(
             "Le niveau #{level} sera disponible dans une version future " \
-            "(B-LT en v0.3, B-LTA en v0.4). Cf. README.adoc § Roadmap."
+            "(B-LTA en v0.4). Cf. README.adoc § Roadmap."
           )
         end
 
@@ -88,9 +91,44 @@ module PDF
           tsa_digest_algorithm: tsa_digest_algorithm,
           tsa_username: tsa_username,
           tsa_password: tsa_password,
+          ltv_certs: ltv_certs,
+          ltv_crls: ltv_crls,
+          ltv_ocsps: ltv_ocsps,
         )
 
-        sign_with_options(input, output, opts)
+        if lvl.b_lt?
+          sign_long_term(input, output, opts)
+        else
+          sign_with_options(input, output, opts)
+        end
+      end
+
+      # PAdES **B-LT** : produce a B-T signature, then append a `/DSS`
+      # Document Security Store carrying the long-term validation
+      # material. The signer's own certificate and the TSA certificates
+      # are harvested automatically (from the CMS and its timestamp
+      # token) ; the CA chain, CRLs and OCSP responses come from the
+      # `ltv_*` options.
+      def self.sign_long_term(input : String, output : String, options : Options) : Nil
+        tmp = File.tempname("pdf-signature-bt", ".pdf")
+        begin
+          b_t = options.dup
+          b_t.level = Level::B_T
+          sign_with_options(input, tmp, b_t)
+
+          cms = DSS.signature_der(tmp)
+          certs = PKCS7.certificates(cms)
+          if token = PKCS7.timestamp_token(cms)
+            certs.concat(PKCS7.certificates(token))
+          end
+          certs.concat(options.ltv_certs.map { |path| DSS.load_der(path) })
+          crls = options.ltv_crls.map { |path| DSS.load_der(path) }
+          ocsps = options.ltv_ocsps.map { |path| DSS.load_der(path) }
+
+          DSS.add(tmp, output, dedup(certs), dedup(crls), dedup(ocsps))
+        ensure
+          File.delete(tmp) if File.exists?(tmp)
+        end
       end
 
       # Variante avec `Options` pré-construites. Signe le PDF `input` par
@@ -119,22 +157,22 @@ module PDF
 
         max_id = [reader.objects.keys.max, root_ref.object_number, page.object_number].max
         sig_id, widget_id, acroform_id = max_id + 1, max_id + 2, max_id + 3
-        prev_startxref = find_startxref(original)
-        id_string = id_array_string(reader, original)
+        prev_startxref = Incremental.find_startxref(original)
+        id_string = Incremental.id_array_string(reader, original)
 
         io = IO::Memory.new
         io.write(original)
         io << '\n' unless original.empty? || original[-1] == 0x0A_u8
 
         offsets = {} of Int32 => Int32
-        emit_object(io, offsets, sig_id, SigDict.build(options).to_pdf)
-        emit_object(io, offsets, widget_id, widget_string(sig_id, page.object_number, options))
-        emit_object(io, offsets, acroform_id, "<< /Fields [#{widget_id} 0 R] /SigFlags 3 >>")
-        emit_object(io, offsets, page.object_number, page_override(page.page_dict, widget_id))
-        emit_object(io, offsets, root_ref.object_number, catalog_override(catalog, acroform_id))
+        Incremental.emit_object(io, offsets, sig_id, SigDict.build(options).to_pdf)
+        Incremental.emit_object(io, offsets, widget_id, widget_string(sig_id, page.object_number, options))
+        Incremental.emit_object(io, offsets, acroform_id, "<< /Fields [#{widget_id} 0 R] /SigFlags 3 >>")
+        Incremental.emit_object(io, offsets, page.object_number, page_override(page.page_dict, widget_id))
+        Incremental.emit_object(io, offsets, root_ref.object_number, catalog_override(catalog, acroform_id))
 
         xref_offset = io.size
-        io << build_xref(offsets)
+        io << Incremental.build_xref(offsets)
         io << "trailer\n<< /Size #{max_id + 4} /Root #{root_ref.object_number} 0 R"
         io << " /Prev #{prev_startxref} /ID #{id_string} >>\n"
         io << "startxref\n#{xref_offset}\n%%EOF\n"
@@ -144,10 +182,11 @@ module PDF
         File.write(output, combined)
       end
 
-      # Writes `N 0 obj … endobj`, recording the object's byte offset.
-      private def self.emit_object(io : IO::Memory, offsets : Hash(Int32, Int32), id : Int32, body : String)
-        offsets[id] = io.size
-        io << id << " 0 obj\n" << body << "\nendobj\n"
+      # Removes duplicate DER blobs (a cert may be both the signer's and
+      # in the supplied chain) while preserving order.
+      private def self.dedup(items : ::Array(::Bytes)) : ::Array(::Bytes)
+        seen = Set(String).new
+        items.select { |der| seen.add?(der.hexstring) }
       end
 
       # The signature widget annotation (invisible : a zero /Rect).
@@ -174,27 +213,6 @@ module PDF
         catalog.each { |key, value| dict[key] = value }
         dict["AcroForm"] = ::PDF::Objects::Reference.new(acroform_id)
         dict.to_pdf
-      end
-
-      # Builds the incremental cross-reference table : the changed object
-      # numbers grouped into contiguous subsections, each entry a fixed
-      # 20-byte record.
-      private def self.build_xref(offsets : Hash(Int32, Int32)) : String
-        nums = offsets.keys.sort!
-        ::String.build do |str|
-          str << "xref\n"
-          i = 0
-          while i < nums.size
-            run_start = i
-            while i + 1 < nums.size && nums[i + 1] == nums[i] + 1
-              i += 1
-            end
-            section = nums[run_start..i]
-            str << section.first << " " << section.size << "\n"
-            section.each { |num| str << "%010d 00000 n \n" % offsets[num] }
-            i += 1
-          end
-        end
       end
 
       # Patches the real /ByteRange then the PKCS#7 /Contents in place.
@@ -242,44 +260,6 @@ module PDF
           i += 1
         end
         raise SignatureError.new("Placeholder /ByteRange introuvable après insertion.")
-      end
-
-      # The byte offset of the last `startxref` value in the original PDF
-      # (for the incremental trailer's /Prev).
-      #
-      # ameba:disable Metrics/CyclomaticComplexity
-      private def self.find_startxref(bytes : ::Bytes) : Int32
-        needle = "startxref".to_slice
-        i = bytes.size - needle.size
-        while i >= 0
-          j = 0
-          while j < needle.size && bytes[i + j] == needle[j]
-            j += 1
-          end
-          break if j == needle.size
-          i -= 1
-        end
-        raise SignatureError.new("startxref introuvable — PDF malformé.") if i < 0
-        k = i + needle.size
-        while k < bytes.size && (bytes[k] == 0x0A_u8 || bytes[k] == 0x0D_u8 || bytes[k] == 0x20_u8)
-          k += 1
-        end
-        value = 0
-        while k < bytes.size && bytes[k] >= 0x30_u8 && bytes[k] <= 0x39_u8
-          value = value * 10 + (bytes[k] - 0x30_u8)
-          k += 1
-        end
-        value
-      end
-
-      # The trailer /ID array (`[<hex> <hex>]`), reusing the original
-      # file's /ID when present, otherwise synthesised from the bytes.
-      private def self.id_array_string(reader : ::PDF::Reader, original : ::Bytes) : String
-        if id = reader.trailer["ID"]?.try(&.as?(::PDF::Objects::Array))
-          return id.to_pdf
-        end
-        hex = Digest::SHA256.hexdigest(original)[0, 32]
-        "[<#{hex}> <#{hex}>]"
       end
     end
   end

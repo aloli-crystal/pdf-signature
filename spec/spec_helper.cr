@@ -150,18 +150,90 @@ module SpecHelper
     end
   end
 
-  # Extracts {signed_bytes, der} from a signed PDF : reuses the
-  # production `ByteRange.compute` (which already locates the signature's
-  # hex /Contents, skipping the page's /Contents reference) to rebuild
-  # the byte-range regions and the PKCS#7 (trimmed to its real DER
-  # length, dropping the zero-padding).
-  def self.extract_signature(bytes : ::Bytes, contents_size : Int32 = 16384) : Tuple(::Bytes, ::Bytes)
-    a, b, c, d = ::PDF::Signature::ByteRange.compute(bytes, contents_size)
-    signed = ::Bytes.new(b + d)
-    bytes[a, b].copy_to(signed[0, b])
-    bytes[c, d].copy_to(signed[b, d])
-    full = String.new(bytes[b, c - b]).hexbytes
+  # Extracts {signed_bytes, der} from a signed PDF using the **stored**
+  # `/ByteRange [o1 l1 o2 l2]` array (NOT a recomputation), so it stays
+  # correct even after a B-LT `/DSS` incremental update has appended
+  # bytes past the original signed range. Rebuilds the two byte-range
+  # regions and the PKCS#7 (trimmed to its real DER length, dropping the
+  # reserved zero-padding).
+  def self.extract_signature(bytes : ::Bytes) : Tuple(::Bytes, ::Bytes)
+    text = String.new(bytes)
+    idx = text.index("/ByteRange")
+    raise "ByteRange introuvable" unless idx
+    open = text.index!('[', idx)
+    close = text.index!(']', open)
+    o1, l1, o2, l2 = text[(open + 1)...close].split.map(&.to_i)
+    signed = ::Bytes.new(l1 + l2)
+    bytes[o1, l1].copy_to(signed[0, l1])
+    bytes[o2, l2].copy_to(signed[l1, l2])
+    full = String.new(bytes[l1, o2 - l1]).hexbytes
     {signed, full[0, der_length(full)]}
+  end
+
+  # Provisions a hermetic LTV chain for PAdES B-LT tests : a local CA, a
+  # signer PKCS#12 issued by it (with AIA/CDP extensions), an OCSP
+  # response (generated offline by the CA acting as responder) and a CRL.
+  # Returns the file paths, or `nil` if `openssl` is unavailable or any
+  # step fails. No network, no responder process — everything offline.
+  def self.issue_ltv_material(dir : String, passphrase : String = "secret")
+    return nil unless Process.find_executable("openssl")
+    Dir.mkdir_p(dir)
+    ca_key = File.join(dir, "ca.key"); ca_crt = File.join(dir, "ca.crt")
+    s_key = File.join(dir, "signer.key"); s_csr = File.join(dir, "signer.csr"); s_crt = File.join(dir, "signer.crt")
+    p12 = File.join(dir, "signer.p12"); ext = File.join(dir, "ext.cnf")
+    index = File.join(dir, "index.txt"); crlnum = File.join(dir, "crlnumber")
+    o_req = File.join(dir, "ocsp_req.der"); o_resp = File.join(dir, "ocsp_resp.der")
+    ca_cnf = File.join(dir, "ca.cnf"); crl_pem = File.join(dir, "crl.pem"); crl_der = File.join(dir, "crl.der")
+
+    return nil unless openssl(["genrsa", "-out", ca_key, "2048"])
+    return nil unless openssl(["req", "-new", "-x509", "-key", ca_key, "-out", ca_crt, "-days", "5", "-subj", "/CN=ALOLI Test CA/O=ALOLI/C=FR"])
+    return nil unless openssl(["genrsa", "-out", s_key, "2048"])
+    return nil unless openssl(["req", "-new", "-key", s_key, "-out", s_csr, "-subj", "/CN=Signataire Test/O=ALOLI/C=FR"])
+
+    File.write(ext, "authorityInfoAccess = OCSP;URI:http://127.0.0.1:8888\n" \
+                    "crlDistributionPoints = URI:http://127.0.0.1:8888/crl.der\n" \
+                    "keyUsage = critical,digitalSignature,nonRepudiation\n")
+    return nil unless openssl(["x509", "-req", "-in", s_csr, "-CA", ca_crt, "-CAkey", ca_key,
+                               "-CAcreateserial", "-out", s_crt, "-days", "4", "-extfile", ext])
+    return nil unless openssl(["pkcs12", "-export", "-out", p12, "-inkey", s_key, "-in", s_crt, "-passout", "pass:#{passphrase}"])
+
+    serial = openssl_out(["x509", "-in", s_crt, "-noout", "-serial"])
+    return nil unless serial
+    serial_hex = serial.split('=').last.strip
+    # UTCTime YY 49 → 2049 : statut V (valide), bien dans le futur.
+    File.write(index, "V\t491231235959Z\t\t#{serial_hex}\tunknown\t/CN=Signataire Test/O=ALOLI/C=FR\n")
+    File.write(crlnum, "01\n")
+
+    return nil unless openssl(["ocsp", "-issuer", ca_crt, "-cert", s_crt, "-reqout", o_req])
+    return nil unless openssl(["ocsp", "-index", index, "-CA", ca_crt, "-rsigner", ca_crt,
+                               "-rkey", ca_key, "-reqin", o_req, "-respout", o_resp])
+
+    File.write(ca_cnf, <<-CNF
+    [ca]
+    default_ca = CA_default
+    [CA_default]
+    database = #{index}
+    crlnumber = #{crlnum}
+    certificate = #{ca_crt}
+    private_key = #{ca_key}
+    default_md = sha256
+    default_crl_days = 4
+    CNF
+    )
+    return nil unless openssl(["ca", "-config", ca_cnf, "-gencrl", "-out", crl_pem])
+    return nil unless openssl(["crl", "-in", crl_pem, "-outform", "DER", "-out", crl_der])
+
+    {p12: p12, ca: ca_crt, signer: s_crt, ocsp: o_resp, crl: crl_der}
+  end
+
+  private def self.openssl(args : Array(String)) : Bool
+    Process.run("openssl", args, output: Process::Redirect::Close, error: Process::Redirect::Close).success?
+  end
+
+  private def self.openssl_out(args : Array(String)) : String?
+    buf = IO::Memory.new
+    status = Process.run("openssl", args, output: buf, error: Process::Redirect::Close)
+    status.success? ? buf.to_s : nil
   end
 
   # The total DER length of the SEQUENCE starting at byte 0 (so the

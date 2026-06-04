@@ -55,6 +55,15 @@ module PDF
       property tsa_username : String?
       property tsa_password : String?
 
+      # Matériel de validation long-terme à embarquer dans le /DSS
+      # (niveau B-LT) : chemins de fichiers de certificats (PEM ou DER,
+      # typiquement la CA émettrice), de CRL (DER) et de réponses OCSP
+      # (DER). Le certificat signataire et les certificats de la TSA sont
+      # ajoutés automatiquement (extraits du CMS et du jeton).
+      property ltv_certs : Array(String)
+      property ltv_crls : Array(String)
+      property ltv_ocsps : Array(String)
+
       def initialize(
         @certificate : String,
         @passphrase : String = "",
@@ -70,6 +79,9 @@ module PDF
         @tsa_digest_algorithm : String = "sha256",
         @tsa_username : String? = nil,
         @tsa_password : String? = nil,
+        @ltv_certs : Array(String) = [] of String,
+        @ltv_crls : Array(String) = [] of String,
+        @ltv_ocsps : Array(String) = [] of String,
       )
         validate!
       end
@@ -87,8 +99,8 @@ module PDF
         unless ["sha256", "sha384", "sha512"].includes?(@tsa_digest_algorithm.downcase)
           raise SignatureError.new("tsa_digest_algorithm doit être sha256, sha384 ou sha512 (#{@tsa_digest_algorithm.inspect} fourni).")
         end
-        if @level.b_t? && @tsa_url.nil?
-          raise SignatureError.new("Le niveau B-T exige une TSA : renseignez `tsa_url` (URL d'un service RFC 3161).")
+        if !@level.b_b? && @tsa_url.nil?
+          raise SignatureError.new("Le niveau #{@level} exige une TSA : renseignez `tsa_url` (URL d'un service RFC 3161).")
         end
       end
     end

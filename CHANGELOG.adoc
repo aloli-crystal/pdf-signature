@@ -7,6 +7,40 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.3.0 — 2026-06-04 — PAdES B-LT (/DSS, matériel de validation)
+
+=== Added
+
+* **`PDF::Signature::DSS` — Document Security Store (ISO 32000-2
+  § 12.8.4.3).** `DSS.add` embarque le matériel de validation
+  long-terme — chaîne de certificats (`/Certs`), CRL (`/CRLs`) et
+  réponses OCSP (`/OCSPs`), chacun en flux indirect — plus une entrée
+  `/VRI` clé par le **SHA-1 (hex majuscule) du DER de la signature**.
+  Tout est ajouté par un **second incremental update**, après le
+  `%%EOF` de la signature : le `/ByteRange` s'arrête là, donc le DSS
+  tombe hors signature et celle-ci reste valide.
+* **`PDF::Signature::Incremental`** — briques d'incremental update
+  (objets, table xref, trailer `/Prev`) extraites de `Signer` et
+  partagées avec `DSS`.
+* **`Signer.sign(level: :b_lt, …)`** — produit une signature B-T puis
+  ajoute le DSS. Le certificat **signataire** (depuis le CMS) et les
+  certificats de la **TSA** (depuis le jeton d'horodatage) sont récoltés
+  automatiquement ; la CA émettrice, les CRL et OCSP arrivent par les
+  options `ltv_certs` / `ltv_crls` / `ltv_ocsps` (chemins PEM ou DER).
+  `PKCS7.certificates` extrait les certificats embarqués d'un CMS ;
+  `DSS.load_der` lit du PEM ou du DER ; `DSS.signature_der` relit le DER
+  de la signature.
+
+=== Validation
+
+PDF B-LT **validé par `pdfsig` (poppler)** → « Signature is Valid » avec
+« Not total document signed » (comportement *attendu* : le DSS est un
+ajout post-signature légitime, hors `/ByteRange`). La signature reste
+vérifiable par `openssl cms -verify` après l'ajout du DSS, et le `/DSS`
+est relu par le parser. Les specs montent une **PKI hermétique**
+(CA locale émettrice + réponse OCSP générée hors-ligne + CRL) en plus de
+la TSA RFC 3161 locale — aucun service réseau. 39 specs, ameba 0.
+
 == v0.2.0 — 2026-06-04 — PAdES B-T (horodatage RFC 3161)
 
 === Added

@@ -54,7 +54,7 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 
 | v0.3
 | PAdES B-LT (matériel de validation long-terme via `/DSS`)
-| 📋 prévu
+| ✅ fait
 
 | v0.4
 | PAdES B-LTA (horodatage d'archive — extension indéfinie)
@@ -96,6 +96,22 @@ PDF::Signature::Signer.sign(
   level: :b_t,
   tsa_url: "https://freetsa.org/tsr",   # tout service RFC 3161
   reason: "Validation rapport ISO 27001",
+)
+
+# B-LT — B-T + matériel de validation long-terme embarqué (/DSS).
+# Les certificats du signataire et de la TSA sont récoltés
+# automatiquement ; fournissez la CA émettrice et les preuves de
+# révocation (réponses OCSP / CRL).
+PDF::Signature::Signer.sign(
+  input:  "rapport.pdf",
+  output: "rapport-signe.pdf",
+  certificate: "./signataire.p12",
+  passphrase: "...",
+  level: :b_lt,
+  tsa_url: "https://freetsa.org/tsr",
+  ltv_certs: ["./ca-emettrice.pem"],
+  ltv_ocsps: ["./signataire-ocsp.der"],
+  ltv_crls:  ["./ca-emettrice.crl"],
 )
 ----
 
