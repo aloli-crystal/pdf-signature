@@ -243,6 +243,49 @@ module SpecHelper
     {p12: p12, ca: ca_crt, signer: s_crt, ocsp: o_resp, crl: crl_der}
   end
 
+  SOFTHSM_CANDIDATES = [
+    "/opt/homebrew/lib/softhsm/libsofthsm2.so",
+    "/usr/lib/softhsm/libsofthsm2.so",
+    "/usr/local/lib/softhsm/libsofthsm2.so",
+    "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so",
+    "/usr/lib/aarch64-linux-gnu/softhsm/libsofthsm2.so",
+  ]
+
+  def self.softhsm_module : String?
+    SOFTHSM_CANDIDATES.find { |path| File.exists?(path) }
+  end
+
+  # Provisions a hermetic SoftHSM token for PKCS#11 backend tests : inits
+  # a token, generates an RSA key + self-signed cert, imports the key.
+  # Returns the module path, the key URI, the cert path and the SoftHSM
+  # config path — or `nil` if SoftHSM / softhsm2-util is unavailable.
+  def self.setup_softhsm(dir : String, pin : String = "1234")
+    return nil unless Process.find_executable("openssl") && Process.find_executable("softhsm2-util")
+    mod = softhsm_module
+    return nil unless mod
+    # Repart d'un tokendir vierge : spec/tmp persiste entre les runs et un
+    # token/clé déjà présent ferait échouer --init-token / --import.
+    FileUtils.rm_rf(dir)
+    Dir.mkdir_p(File.join(dir, "tokens"))
+    conf = File.join(dir, "softhsm2.conf")
+    File.write(conf, "directories.tokendir = #{File.join(dir, "tokens")}\n")
+    env = {"SOFTHSM2_CONF" => conf}
+
+    return nil unless softhsm(["--init-token", "--free", "--label", "aloli", "--pin", pin, "--so-pin", "#{pin}99"], env)
+    key = File.join(dir, "hsm.key")
+    cert = File.join(dir, "hsm.crt")
+    return nil unless openssl(["genrsa", "-out", key, "2048"])
+    return nil unless openssl(["req", "-new", "-x509", "-key", key, "-out", cert, "-days", "2", "-subj", "/CN=HSM Signer/O=ALOLI/C=FR"])
+    return nil unless softhsm(["--import", key, "--token", "aloli", "--label", "mykey", "--id", "01", "--pin", pin], env)
+
+    {module: mod, key_uri: "pkcs11:token=aloli;object=mykey;type=private", cert: cert, conf: conf}
+  end
+
+  private def self.softhsm(args : Array(String), env) : Bool
+    Process.run("softhsm2-util", args, env: env,
+      output: Process::Redirect::Close, error: Process::Redirect::Close).success?
+  end
+
   private def self.openssl(args : Array(String)) : Bool
     Process.run("openssl", args, output: Process::Redirect::Close, error: Process::Redirect::Close).success?
   end

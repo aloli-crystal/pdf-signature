@@ -64,9 +64,9 @@ Les deux premières sont gérées par `aloli-crystal/pdf`. La
 | Vérification (lecture + validation)
 | ✅ fait
 
-| v0.6+
+| v0.6
 | Backend HSM / PKCS#11
-| 💭 idée
+| ✅ fait
 |===
 
 == Démarrage rapide

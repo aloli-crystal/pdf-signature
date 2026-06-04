@@ -55,6 +55,10 @@ module PDF
         ltv_certs : Array(String) = [] of String,
         ltv_crls : Array(String) = [] of String,
         ltv_ocsps : Array(String) = [] of String,
+        pkcs11_key : String? = nil,
+        pkcs11_module : String? = nil,
+        pkcs11_pin : String? = nil,
+        pkcs11_engine_path : String? = nil,
       ) : Nil
         unless File.exists?(input)
           raise SignatureError.new("Fichier d'entrée introuvable : #{input}")
@@ -87,6 +91,10 @@ module PDF
           ltv_certs: ltv_certs,
           ltv_crls: ltv_crls,
           ltv_ocsps: ltv_ocsps,
+          pkcs11_key: pkcs11_key,
+          pkcs11_module: pkcs11_module,
+          pkcs11_pin: pkcs11_pin,
+          pkcs11_engine_path: pkcs11_engine_path,
         )
 
         case
@@ -235,21 +243,38 @@ module PDF
         bytes[a, b].copy_to(signed[0, b])
         bytes[c, d].copy_to(signed[b, d])
 
-        der = if (tsa = options.tsa_url) && options.level.b_t?
-                PKCS7.sign_with_timestamp(
-                  signed, options.certificate, options.passphrase, tsa,
-                  options.digest_algorithm, options.tsa_digest_algorithm,
-                  options.tsa_username, options.tsa_password,
-                )
-              else
-                PKCS7.sign(signed, options.certificate, options.passphrase, options.digest_algorithm)
-              end
+        der = produce_cms(signed, options)
         hex = der.hexstring
         capacity = options.contents_size * 2
         if hex.size > capacity
           raise SignatureError.new("Signature de #{der.size} octets trop grande pour contents_size=#{options.contents_size}. Augmentez `contents_size`.")
         end
         overwrite!(bytes, b, hex.ljust(capacity, '0'))
+      end
+
+      # Produces the detached CMS over `signed`, choosing the software
+      # (PKCS#12) or hardware (PKCS#11) backend, and — at B-T and above —
+      # grafting the RFC 3161 signature timestamp. CAdES-BES (ESS
+      # signing-certificate-v2) is requested for every non-B-B level.
+      private def self.produce_cms(signed : ::Bytes, options : Options) : ::Bytes
+        cades = !options.level.b_b?
+        cms = if uri = options.pkcs11_key
+                Pkcs11.cms_sign(
+                  signed, options.certificate, uri,
+                  options.pkcs11_module || raise(SignatureError.new("pkcs11_module requis.")),
+                  options.pkcs11_pin || "",
+                  Pkcs11.engine_path(options.pkcs11_engine_path),
+                  options.digest_algorithm, cades: cades)
+              else
+                PKCS7.sign(signed, options.certificate, options.passphrase, options.digest_algorithm, cades: cades)
+              end
+
+        if cades && (tsa = options.tsa_url)
+          token = TSA.timestamp(PKCS7.signature_value(cms), tsa,
+            options.tsa_digest_algorithm, options.tsa_username, options.tsa_password)
+          cms = PKCS7.embed_timestamp_token(cms, token)
+        end
+        cms
       end
 
       # Overwrites `replacement`'s bytes at `offset` (same-length patch).

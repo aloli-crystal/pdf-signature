@@ -64,9 +64,9 @@ deserves its own shard because:
 | Verification (reading + validation)
 | ✅ done
 
-| v0.6+
+| v0.6
 | HSM / PKCS#11 backend
-| 💭 idea
+| ✅ done
 |===
 
 == Quickstart

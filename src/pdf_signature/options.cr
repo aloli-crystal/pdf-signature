@@ -64,6 +64,24 @@ module PDF
       property ltv_crls : Array(String)
       property ltv_ocsps : Array(String)
 
+      # Backend PKCS#11 (HSM / smartcard / SoftHSM) : si `pkcs11_key` est
+      # renseigné, la clé privée ne quitte jamais le module — `certificate`
+      # désigne alors le certificat du signataire (PEM) et non un PKCS#12,
+      # et `passphrase` est ignorée. `pkcs11_key` est une URI RFC 7512
+      # (`pkcs11:token=…;object=…;type=private`), `pkcs11_module` le chemin
+      # du module PKCS#11, `pkcs11_pin` le code (passé par variable
+      # d'environnement, jamais en argv), `pkcs11_engine_path` le chemin de
+      # l'engine libp11 (auto-détecté si nil).
+      property pkcs11_key : String?
+      property pkcs11_module : String?
+      property pkcs11_pin : String?
+      property pkcs11_engine_path : String?
+
+      # `true` quand la signature doit passer par le backend PKCS#11.
+      def pkcs11? : Bool
+        !@pkcs11_key.nil?
+      end
+
       def initialize(
         @certificate : String,
         @passphrase : String = "",
@@ -82,6 +100,10 @@ module PDF
         @ltv_certs : Array(String) = [] of String,
         @ltv_crls : Array(String) = [] of String,
         @ltv_ocsps : Array(String) = [] of String,
+        @pkcs11_key : String? = nil,
+        @pkcs11_module : String? = nil,
+        @pkcs11_pin : String? = nil,
+        @pkcs11_engine_path : String? = nil,
       )
         validate!
       end
@@ -101,6 +123,9 @@ module PDF
         end
         if !@level.b_b? && @tsa_url.nil?
           raise SignatureError.new("Le niveau #{@level} exige une TSA : renseignez `tsa_url` (URL d'un service RFC 3161).")
+        end
+        if !@pkcs11_key.nil? && @pkcs11_module.nil?
+          raise SignatureError.new("Le backend PKCS#11 exige `pkcs11_module` (chemin du module .so/.dylib).")
         end
       end
     end

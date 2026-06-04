@@ -7,6 +7,38 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.6.0 — 2026-06-04 — Backend PKCS#11 (HSM / SoftHSM)
+
+=== Added
+
+* **`PDF::Signature::Pkcs11` — signature par clé matérielle.** La clé
+  privée ne quitte jamais le module (HSM, carte à puce, SoftHSM) : elle
+  est désignée par une URI PKCS#11 (RFC 7512). `Pkcs11.cms_sign` produit
+  le CMS détaché via `openssl cms -sign` piloté par l'engine libp11
+  `pkcs11`. L'engine et le module sont câblés par un `OPENSSL_CONF`
+  jetable (0600), le PIN passe par variable d'environnement
+  (`-passin env:…`), jamais en argv. `Pkcs11.engine_path` auto-détecte
+  l'engine ; `Pkcs11.available?` permet un repli gracieux.
+* **`Signer.sign(pkcs11_key:, pkcs11_module:, pkcs11_pin:,
+  pkcs11_engine_path:)`** — bascule sur le token. `certificate` désigne
+  alors le **certificat** du signataire (PEM). Le backend matériel
+  fonctionne à **tous les niveaux** (B-B → B-LTA) : l'orchestration
+  signature/horodatage/DSS/DocTimeStamp est unifiée (`produce_cms`) et
+  indépendante du backend.
+* `Options` : `pkcs11_key` / `pkcs11_module` / `pkcs11_pin` /
+  `pkcs11_engine_path` (+ `pkcs11?`). B-LT récolte automatiquement le
+  certificat du signataire depuis le CMS, donc le `/DSS` fonctionne
+  identiquement avec une clé HSM.
+
+=== Validation
+
+Round-trip **sign → verify** avec un token **SoftHSM** hermétique
+(`softhsm2-util` : init token, génération clé + cert, import) : B-B et
+B-T signés par une clé qui **ne quitte pas le token**, signatures
+vérifiées par `openssl cms -verify` et horodatage RFC 3161 embarqué
+détecté. 48 specs, ameba 0. Pré-requis : `libp11` (engine OpenSSL
+`pkcs11`) + un module PKCS#11.
+
 == v0.5.0 — 2026-06-04 — Vérification
 
 === Added
