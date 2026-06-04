@@ -7,6 +7,38 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.1.3 — 2026-06-04 — PAdES B-B fonctionnel
+
+=== Added
+
+* **`Signer.sign_with_options` — orchestration PAdES B-B complète.** Le
+  PDF d'entrée est signé par un **incremental update** : les octets
+  d'origine restent intacts et l'on ajoute, en fin de fichier, le dict
+  /Sig (placeholders /Contents + /ByteRange), le champ de signature
+  (widget /FT /Sig invisible), l'AcroForm (/SigFlags 3), les versions
+  mises à jour de la page (/Annots) et du catalog (/AcroForm), une table
+  xref incrémentale et un trailer /Prev. Le /ByteRange réel et le
+  /Contents (PKCS#7 hex) sont ensuite patchés in-place.
+* `ByteRange.compute` distingue désormais le /Contents **hexadécimal de
+  la signature** du /Contents de la page (référence vers le flux) — il
+  retient le `/Contents` suivi d'un `<` dont le `>` tombe exactement à
+  la taille réservée.
+* Placeholder /ByteRange élargi à 4 entiers de 10 chiffres
+  (`BYTE_RANGE_PLACEHOLDER`) pour un patch in-place sans décalage.
+
+=== Validation
+
+PDF signé **validé par deux outils tiers** : `openssl cms -verify`
+(round-trip dans les specs) et **`pdfsig` (poppler)** sur un vrai
+fichier → « Signature Validation: Signature is Valid », « Total document
+signed », type adbe.pkcs7.detached, SHA-256. Le certificat auto-signé
+ressort « issuer isn't Trusted » (attendu, hors chaîne de confiance).
+
+=== Changed
+
+* Dépendance `pdf` relevée de `~> 0.5` à `~> 1.0` (1.6.0) pour disposer
+  d'AcroForm / champ de signature et du writer xref-stream.
+
 == v0.1.2 — 2026-06-04
 
 === Added

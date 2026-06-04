@@ -34,41 +34,46 @@ module PDF
       # `<` dans les 64 octets qui suivent (typique pour un dict PDF).
       def self.compute(bytes : ::Bytes, contents_size : Int32) : Tuple(Int32, Int32, Int32, Int32)
         contents_marker = "/Contents".to_slice
-        idx = find_subsequence(bytes, contents_marker)
-        raise SignatureError.new("/Contents introuvable dans le PDF — la signature n'a pas été insérée correctement.") if idx < 0
+        expected_hex = contents_size * 2
 
-        # Trouver le '<' juste après /Contents (peut avoir des espaces ou /attrs entre)
-        open_idx = find_byte(bytes, '<'.ord.to_u8, idx)
-        raise SignatureError.new("Marqueur '<' du /Contents introuvable.") if open_idx < 0
+        # A document holds several `/Contents` keys (notably the page's
+        # `/Contents n 0 R`). Only the *signature* one is a hex string of
+        # the reserved size : scan every `/Contents`, skip whitespace, and
+        # accept the one immediately followed by a single `<` whose
+        # matching `>` sits exactly `contents_size*2` bytes later.
+        from = 0
+        loop do
+          idx = find_subsequence(bytes, contents_marker, from)
+          raise SignatureError.new("/Contents hexadécimal du /Sig introuvable — la signature n'a pas été insérée correctement.") if idx < 0
+          from = idx + contents_marker.size
 
-        # Le placeholder est de taille `contents_size * 2` (hex chars) entre les chevrons
-        close_idx = open_idx + 1 + contents_size * 2
-        if close_idx >= bytes.size || bytes[close_idx] != '>'.ord.to_u8
-          raise SignatureError.new(
-            "Marqueur '>' du /Contents non trouvé à l'offset attendu " \
-            "(open=#{open_idx}, expected_close=#{close_idx}, " \
-            "byte_at_close=#{close_idx < bytes.size ? bytes[close_idx].to_s(16) : "EOF"}). " \
-            "Le placeholder a-t-il la bonne taille ?"
-          )
+          cursor = idx + contents_marker.size
+          while cursor < bytes.size && whitespace?(bytes[cursor])
+            cursor += 1
+          end
+          next unless cursor < bytes.size && bytes[cursor] == '<'.ord.to_u8
+          next if cursor + 1 < bytes.size && bytes[cursor + 1] == '<'.ord.to_u8 # `<<` dict opener
+
+          close_idx = cursor + 1 + expected_hex
+          next unless close_idx < bytes.size && bytes[close_idx] == '>'.ord.to_u8
+
+          # The hash covers everything except the bytes inside the `<…>` :
+          #   [0, cursor+1)   and   [close_idx, end)
+          return {0, cursor + 1, close_idx, bytes.size - close_idx}
         end
+      end
 
-        # Le hash couvre :
-        # * de l'octet 0 au '<' inclus  → [0, open_idx + 1]
-        # * du '>' inclus jusqu'à la fin → [close_idx, bytes.size - close_idx]
-        a = 0
-        b = open_idx + 1
-        c = close_idx
-        d = bytes.size - close_idx
-        {a, b, c, d}
+      private def self.whitespace?(byte : UInt8) : Bool
+        byte == 0x20 || byte == 0x0A || byte == 0x0D || byte == 0x09 || byte == 0x00 || byte == 0x0C
       end
 
       # Recherche naïve de sous-séquence d'octets. O(n*m) — suffisant
       # pour des PDFs de taille raisonnable (< 100 Mo). À optimiser
       # avec Boyer-Moore si profilage le justifie.
-      private def self.find_subsequence(bytes : ::Bytes, needle : ::Bytes) : Int32
+      private def self.find_subsequence(bytes : ::Bytes, needle : ::Bytes, from : Int32 = 0) : Int32
         return -1 if needle.size > bytes.size
         last_start = bytes.size - needle.size
-        i = 0
+        i = from
         while i <= last_start
           j = 0
           while j < needle.size && bytes[i + j] == needle[j]

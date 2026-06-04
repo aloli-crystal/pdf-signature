@@ -55,6 +55,32 @@ module SpecHelper
       File.delete(crt) if File.exists?(crt)
     end
   end
+
+  # Extracts {signed_bytes, der} from a signed PDF : reuses the
+  # production `ByteRange.compute` (which already locates the signature's
+  # hex /Contents, skipping the page's /Contents reference) to rebuild
+  # the byte-range regions and the PKCS#7 (trimmed to its real DER
+  # length, dropping the zero-padding).
+  def self.extract_signature(bytes : ::Bytes, contents_size : Int32 = 16384) : Tuple(::Bytes, ::Bytes)
+    a, b, c, d = ::PDF::Signature::ByteRange.compute(bytes, contents_size)
+    signed = ::Bytes.new(b + d)
+    bytes[a, b].copy_to(signed[0, b])
+    bytes[c, d].copy_to(signed[b, d])
+    full = String.new(bytes[b, c - b]).hexbytes
+    {signed, full[0, der_length(full)]}
+  end
+
+  # The total DER length of the SEQUENCE starting at byte 0 (so the
+  # zero-padding after the PKCS#7 envelope is dropped).
+  def self.der_length(b : ::Bytes) : Int32
+    return b.size if b.size < 2
+    len = b[1]
+    return 2 + len.to_i if len < 0x80
+    count = (len & 0x7f).to_i
+    total = 0
+    count.times { |i| total = (total << 8) | b[2 + i].to_i }
+    2 + count + total
+  end
 end
 
 # Cleanup tmp dir between runs (kept simple for v0.1)

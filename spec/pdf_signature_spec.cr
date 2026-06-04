@@ -160,7 +160,7 @@ describe PDF::Signature::ByteRange do
   end
 
   it "lève SignatureError si /Contents introuvable" do
-    expect_raises(PDF::Signature::SignatureError, /\/Contents introuvable/) do
+    expect_raises(PDF::Signature::SignatureError, /Contents.*introuvable/) do
       PDF::Signature::ByteRange.compute("pas de signature ici".to_slice, 16384)
     end
   end
@@ -241,16 +241,26 @@ describe PDF::Signature::Signer do
     end
   end
 
-  it "lève NotImplementedError sur B-B (orchestration différée)" do
-    pdf_path = File.join(SpecHelper::TMP_DIR, "src-signer-bb.pdf")
-    SpecHelper.write_minimal_pdf(pdf_path)
-    expect_raises(PDF::Signature::NotImplementedError, /orchestration/) do
-      PDF::Signature::Signer.sign(
-        input: pdf_path,
-        output: "/tmp/out.pdf",
-        certificate: pdf_path, # bidon mais existe
-        level: :b_b,
-      )
-    end
+  it "signe un PDF en PAdES B-B et produit une signature vérifiable" do
+    pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
+    src = File.join(SpecHelper::TMP_DIR, "src-signer-bb.pdf")
+    signed = File.join(SpecHelper::TMP_DIR, "signed-bb.pdf")
+    p12 = File.join(SpecHelper::TMP_DIR, "signer-bb.p12")
+    SpecHelper.write_minimal_pdf(src)
+    pending! "p12 non généré" unless SpecHelper.write_self_signed_p12(p12, "secret")
+
+    PDF::Signature::Signer.sign(
+      input: src, output: signed, certificate: p12, passphrase: "secret", level: :b_b,
+    )
+    File.exists?(signed).should be_true
+
+    bytes = File.open(signed, "rb", &.getb_to_end)
+    # Le PDF signé contient bien un /Sig et un /ByteRange patché (≠ placeholder).
+    String.new(bytes).includes?("/Type /Sig").should be_true
+    String.new(bytes).includes?("9999999999").should be_false
+
+    # Reconstruire la zone byte-range et le DER /Contents, puis vérifier.
+    signed_data, der = SpecHelper.extract_signature(bytes)
+    PDF::Signature::PKCS7.verify(signed_data, der).should be_true
   end
 end

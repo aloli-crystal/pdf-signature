@@ -90,11 +90,16 @@ module PDF
         )
       end
 
-      # Tableau `[0 0000000000 0000000000 0000000000]` à patcher.
+      # The fixed-width `/ByteRange` placeholder as serialised — four
+      # 10-digit integers, so the real bounds (also formatted to 10
+      # digits by `ByteRange.format`) can be patched in place without
+      # changing any following byte offset.
+      BYTE_RANGE_PLACEHOLDER = "[9999999999 9999999999 9999999999 9999999999]"
+
+      # Tableau `[9999999999 9999999999 9999999999 9999999999]` à patcher.
       private def self.placeholder_byte_range : ::PDF::Objects::Array
         arr = ::PDF::Objects::Array.new
-        arr << ::PDF::Objects::Number.new(0)
-        3.times { arr << ::PDF::Objects::Number.new(0_i64) }
+        4.times { arr << ::PDF::Objects::Number.new(9_999_999_999_i64) }
         arr
       end
 
