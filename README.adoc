@@ -189,6 +189,10 @@ pdfsig sign -i report.pdf -o signed.pdf -c signer.crt -l b-t \
             -t https://freetsa.org/tsr \
             -k "pkcs11:token=…;object=…;type=private" -m /path/to/module.so
 
+# Strict PAdES (native CMS, no signing-time signed attribute ; B-T+)
+pdfsig sign -i report.pdf -o signed.pdf -c signer.p12 -l b-t -s \
+            -t https://freetsa.org/tsr
+
 # Verify (one report per signature ; exit 0 if all valid, 2 otherwise)
 pdfsig verify signed.pdf -a trust.pem
 

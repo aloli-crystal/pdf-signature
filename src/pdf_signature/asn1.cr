@@ -143,6 +143,55 @@ module PDF
         Node.new(0x31_u8, children: children)
       end
 
+      # A SET OF (tag 0x31) whose elements are sorted by their DER
+      # encoding, as DER requires (X.690 § 11.6). Needed for CMS
+      # `signedAttrs`, which must be DER even when the SignerInfo stores
+      # it under an IMPLICIT `[0]` tag.
+      def self.sorted_set(children : ::Array(Node)) : Node
+        ordered = children.sort { |left, right| compare_der(left.to_der, right.to_der) }
+        Node.new(0x31_u8, children: ordered)
+      end
+
+      # A non-negative INTEGER (tag 0x02), minimally encoded with a
+      # leading 0x00 when the high bit would otherwise mark it negative.
+      def self.integer(value : Int) : Node
+        raise SignatureError.new("INTEGER négatif non supporté.") if value < 0
+        octets = [] of UInt8
+        if value == 0
+          octets << 0_u8
+        else
+          rest = value
+          while rest > 0
+            octets.unshift((rest & 0xFF).to_u8)
+            rest >>= 8
+          end
+          octets.unshift(0_u8) if (octets.first & 0x80) != 0
+        end
+        Node.new(0x02_u8, content: ::Bytes.new(octets.size) { |i| octets[i] })
+      end
+
+      # An OCTET STRING (tag 0x04).
+      def self.octet_string(bytes : ::Bytes) : Node
+        Node.new(0x04_u8, content: bytes)
+      end
+
+      # The ASN.1 NULL (tag 0x05, empty).
+      def self.null : Node
+        Node.new(0x05_u8)
+      end
+
+      # Lexicographic comparison of two DER encodings (X.690 SET OF order).
+      private def self.compare_der(a : ::Bytes, b : ::Bytes) : Int32
+        limit = Math.min(a.size, b.size)
+        i = 0
+        while i < limit
+          return -1 if a[i] < b[i]
+          return 1 if a[i] > b[i]
+          i += 1
+        end
+        a.size <=> b.size
+      end
+
       # A context-specific constructed node `[n]` (tag 0xA0 | n) wrapping
       # `children`. Used for IMPLICIT-tagged collections such as
       # `unsignedAttrs [1] IMPLICIT SET OF Attribute`.

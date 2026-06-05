@@ -59,6 +59,7 @@ module PDF
         pkcs11_module : String? = nil,
         pkcs11_pin : String? = nil,
         pkcs11_engine_path : String? = nil,
+        strict_pades : Bool = false,
       ) : Nil
         unless File.exists?(input)
           raise SignatureError.new("Fichier d'entrée introuvable : #{input}")
@@ -95,6 +96,7 @@ module PDF
           pkcs11_module: pkcs11_module,
           pkcs11_pin: pkcs11_pin,
           pkcs11_engine_path: pkcs11_engine_path,
+          strict_pades: strict_pades,
         )
 
         case
@@ -258,13 +260,18 @@ module PDF
       # signing-certificate-v2) is requested for every non-B-B level.
       private def self.produce_cms(signed : ::Bytes, options : Options) : ::Bytes
         cades = !options.level.b_b?
+        strict = cades && options.strict_pades?
         cms = if uri = options.pkcs11_key
-                Pkcs11.cms_sign(
-                  signed, options.certificate, uri,
-                  options.pkcs11_module || raise(SignatureError.new("pkcs11_module requis.")),
-                  options.pkcs11_pin || "",
-                  Pkcs11.engine_path(options.pkcs11_engine_path),
-                  options.digest_algorithm, cades: cades)
+                module_path = options.pkcs11_module || raise(SignatureError.new("pkcs11_module requis."))
+                engine = Pkcs11.engine_path(options.pkcs11_engine_path)
+                pin = options.pkcs11_pin || ""
+                if strict
+                  PKCS7.sign_strict_pkcs11(signed, DSS.load_der(options.certificate), uri, module_path, pin, engine)
+                else
+                  Pkcs11.cms_sign(signed, options.certificate, uri, module_path, pin, engine, options.digest_algorithm, cades: cades)
+                end
+              elsif strict
+                PKCS7.sign_strict(signed, options.certificate, options.passphrase)
               else
                 PKCS7.sign(signed, options.certificate, options.passphrase, options.digest_algorithm, cades: cades)
               end

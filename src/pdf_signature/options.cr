@@ -82,6 +82,12 @@ module PDF
         !@pkcs11_key.nil?
       end
 
+      # PAdES strict : construire le CMS nativement pour OMETTRE
+      # l'attribut signé `signing-time` (ETSI EN 319 142-1 § 5.3 — le
+      # temps vient du `/M` et de l'horodatage). N'a d'effet qu'aux
+      # niveaux CAdES (B-T et au-dessus) ; SHA-256 uniquement.
+      property? strict_pades : Bool
+
       def initialize(
         @certificate : String,
         @passphrase : String = "",
@@ -104,6 +110,7 @@ module PDF
         @pkcs11_module : String? = nil,
         @pkcs11_pin : String? = nil,
         @pkcs11_engine_path : String? = nil,
+        @strict_pades : Bool = false,
       )
         validate!
       end
@@ -126,6 +133,9 @@ module PDF
         end
         if !@pkcs11_key.nil? && @pkcs11_module.nil?
           raise SignatureError.new("Le backend PKCS#11 exige `pkcs11_module` (chemin du module .so/.dylib).")
+        end
+        if @strict_pades && @digest_algorithm.downcase != "sha256"
+          raise SignatureError.new("Le mode PAdES strict est limité à SHA-256 (digest_algorithm=#{@digest_algorithm.inspect} fourni).")
         end
       end
     end

@@ -78,6 +78,28 @@ module PDF
         end
       end
 
+      # Signs `data` with the PKCS#11 key (`RSA(DigestInfo(SHA-256(data)))`)
+      # — the building block of a strict-PAdES SignerInfo whose key lives
+      # in the token. The PIN is passed by environment variable.
+      def self.rsa_sign(data : ::Bytes, key_uri : String, module_path : String,
+                        pin : String, engine_path : String) : ::Bytes
+        PKCS7.ensure_openssl!
+        raise SignatureError.new("Module PKCS#11 introuvable : #{module_path}") unless File.exists?(module_path)
+        with_tempdir do |dir|
+          input = File.join(dir, "tbs.bin")
+          output = File.join(dir, "sig.bin")
+          config = File.join(dir, "engine.cnf")
+          write_private(input, data)
+          File.write(config, engine_config(engine_path, module_path))
+          File.chmod(config, 0o600)
+          PKCS7.run_openssl([
+            "dgst", "-sha256", "-sign", key_uri, "-keyform", "engine", "-engine", "pkcs11",
+            "-passin", "env:PDFSIG_P11_PIN", "-out", output, input,
+          ], {"OPENSSL_CONF" => config, "PDFSIG_P11_PIN" => pin})
+          File.open(output, "rb", &.getb_to_end)
+        end
+      end
+
       # An OpenSSL config that registers the `pkcs11` engine and points it
       # at the token module. Loaded via `OPENSSL_CONF` for the signing
       # subprocess only.

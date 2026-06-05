@@ -51,6 +51,54 @@ module PDF
         end
       end
 
+      # Strict-PAdES detached CAdES-BES over `data`, signed by the
+      # PKCS#12 at `p12_path` — built natively (no `signing-time` signed
+      # attribute, unlike `openssl cms -cades`). SHA-256 only.
+      def self.sign_strict(data : ::Bytes, p12_path : String, passphrase : String) : ::Bytes
+        ensure_openssl!
+        unless File.exists?(p12_path)
+          raise SignatureError.new("Certificat PKCS#12 introuvable : #{p12_path}")
+        end
+        with_tempdir do |dir|
+          cert = File.join(dir, "cert.pem")
+          key = File.join(dir, "key.pem")
+          extract_pem(p12_path, passphrase, cert, key)
+          cert_der = certificate_der(cert)
+          CmsBuilder.build(data, cert_der) { |signed_attrs| rsa_sign(signed_attrs, key) }
+        end
+      end
+
+      # Strict-PAdES CAdES-BES whose RSA signature is produced by a
+      # PKCS#11 token. `cert_der` is the signer certificate (DER) ;
+      # `key_uri`/`module_path`/`pin`/`engine_path` address the key.
+      def self.sign_strict_pkcs11(data : ::Bytes, cert_der : ::Bytes, key_uri : String,
+                                  module_path : String, pin : String, engine_path : String) : ::Bytes
+        CmsBuilder.build(data, cert_der) do |signed_attrs|
+          Pkcs11.rsa_sign(signed_attrs, key_uri, module_path, pin, engine_path)
+        end
+      end
+
+      # The DER bytes of a PEM certificate file.
+      def self.certificate_der(cert_pem : String) : ::Bytes
+        with_tempdir do |dir|
+          der = File.join(dir, "cert.der")
+          run_openssl(["x509", "-in", cert_pem, "-outform", "DER", "-out", der])
+          File.open(der, "rb", &.getb_to_end)
+        end
+      end
+
+      # RSA-PKCS#1-v1.5 signature of `RSA(DigestInfo(SHA-256(data)))` with
+      # the private key in `key_pem` — i.e. the CMS signature value.
+      private def self.rsa_sign(data : ::Bytes, key_pem : String) : ::Bytes
+        with_tempdir do |dir|
+          input = File.join(dir, "tbs.bin")
+          output = File.join(dir, "sig.bin")
+          write_private(input, data)
+          run_openssl(["dgst", "-sha256", "-sign", key_pem, "-out", output, input])
+          File.open(output, "rb", &.getb_to_end)
+        end
+      end
+
       # `true` if `signature` (detached CMS, DER) is a cryptographically
       # valid signature over `data`. With `ca_bundle` the signer's chain
       # must also be trusted by that bundle ; without it only the

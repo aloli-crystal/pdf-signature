@@ -29,6 +29,7 @@ pkcs11_key : String? = nil
 pkcs11_module : String? = nil
 pkcs11_pin_env = "PDFSIG_PIN"
 pkcs11_engine : String? = nil
+strict_pades = false
 ca_bundle : String? = nil
 
 parser = OptionParser.new do |opt|
@@ -63,6 +64,7 @@ parser = OptionParser.new do |opt|
   opt.on("-r TEXT", "--reason=TEXT", "Motif de la signature (métadonnée)") { |v| reason = v }
   opt.on("-L TEXT", "--location=TEXT", "Lieu de la signature (métadonnée)") { |v| location = v }
   opt.on("-n TEXT", "--name=TEXT", "Nom du signataire (métadonnée)") { |v| signer_name = v }
+  opt.on("-s", "--strict", "PAdES strict : CMS natif sans signing-time (B-T+, SHA-256)") { strict_pades = true }
 
   opt.separator ""
   opt.separator "Matériel de validation long-terme (b-lt), répétables :"
@@ -168,6 +170,7 @@ when "sign"
       pkcs11_module: pkcs11_module,
       pkcs11_pin: pkcs11_key ? (ENV[pkcs11_pin_env]? || "") : "",
       pkcs11_engine_path: pkcs11_engine,
+      strict_pades: strict_pades,
     )
     puts "✓ PDF signé (#{level.downcase}) : #{output}"
     exit 0

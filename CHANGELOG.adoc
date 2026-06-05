@@ -7,6 +7,34 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.8.0 — 2026-06-05 — PAdES strict (CMS natif, sans signing-time)
+
+=== Added
+
+* **`PDF::Signature::CmsBuilder` — construction native du CMS.** Assemble
+  un `SignedData` CAdES-BES détaché *à la main* sur le DER, avec l'ESS
+  `signing-certificate-v2` mais **sans** l'attribut signé `signing-time`
+  — le profil PAdES strict (ETSI EN 319 142-1 § 5.3 : le temps vient du
+  `/M` et de l'horodatage, pas d'un attribut signé). `openssl cms -sign
+  -cades` injecte toujours `signing-time`, d'où la construction maison.
+  La bibliothèque ne fait que la structure ; la signature RSA sur le
+  `signedAttrs` est produite par un bloc, donc la clé peut rester dans un
+  fichier ou un HSM.
+* **`ASN1`** gagne `sorted_set` (SET OF trié DER, X.690 § 11.6),
+  `integer`, `octet_string`, `null`.
+* **`PKCS7.sign_strict` / `PKCS7.sign_strict_pkcs11`** + `Pkcs11.rsa_sign`
+  (signature du `signedAttrs` par le token). `Options#strict_pades?` et
+  `Signer.sign(strict_pades: true)` ; CLI `pdfsig sign --strict` / `-s`.
+  N'a d'effet qu'aux niveaux CAdES (B-T+) ; SHA-256 uniquement.
+
+=== Validation
+
+CMS strict **validé par deux outils tiers** : `openssl cms -verify`
+(« CMS Verification successful ») et **`pdfsig` (poppler)** → « Signature
+is Valid », ETSI.CAdES.detached — poppler accepte le CAdES-BES assemblé à
+la main. `openssl asn1parse` confirme **0 attribut `signing-time`** et la
+présence de l'ESS `signing-certificate-v2`. 58 specs, ameba 0.
+
 == v0.7.0 — 2026-06-05 — CLI `pdfsig`
 
 === Added
