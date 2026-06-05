@@ -7,6 +7,37 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.7.0 — 2026-06-05 — CLI `pdfsig`
+
+=== Ajouté
+
+* **Binaire `pdfsig`** (target `src/cli.cr`) — l'interface en ligne de
+  commande aux conventions ALOLI :
++
+--
+** `pdfsig sign -i ENTREE.pdf -o SORTIE.pdf -c CERT [options]` — tous
+   les niveaux (b-b / b-t / b-lt / b-lta), TSA (`-t`), métadonnées
+   (`-r`/`-L`/`-n`), matériel LTV répétable (`-C`/`-R`/`-O`) et backend
+   PKCS#11 (`-k`/`-m`/`-P`/`-e`).
+** `pdfsig verify SIGNE.pdf [-a TRUST.pem]` — un rapport par champ
+   (niveau PAdES, validité, couverture). Code de sortie : 0 si tout est
+   valide, 2 sinon.
+** `pdfsig help [SOUS-COMMANDE]` (+ `-h`/`--help`), `pdfsig version`
+   (+ `-v`/`--version`). Sous-commande inconnue refusée avec la liste
+   valide.
+--
+* **Sécurité — aucun secret en argv.** La phrase de passe du PKCS#12 et
+  le PIN PKCS#11 sont lus depuis une **variable d'environnement** dont
+  on passe le *nom* (`-p`/`--passphrase-env`, `-P`/`--pkcs11-pin-env`),
+  jamais la valeur — invisibles dans `ps`. Chaque flag long a un short.
+
+=== Validation
+
+Specs d'intégration : build du binaire puis aller-retour réel
+**`sign` → `verify`** (phrase de passe via l'environnement), plus la
+batterie `help` / `help <sub>` / sous-commande inconnue / arguments
+manquants. 56 specs, ameba 0.
+
 == v0.6.0 — 2026-06-04 — Backend PKCS#11 (HSM / SoftHSM)
 
 === Ajouté

@@ -151,13 +151,55 @@ attribut non-signé `id-aa-timeStampToken`, validée par `openssl cms`,
 
 == Installation
 
+Comme bibliothèque :
+
 [source,yaml]
 ----
 dependencies:
   pdf-signature:
     github: aloli-crystal/pdf-signature
-    version: "~> 0.1"
+    version: "~> 0.7"
 ----
+
+Comme outil en ligne de commande `pdfsig` — build puis symlink (pas de
+`sudo`, pas de copie dans `/usr/local/bin`) :
+
+[source,sh]
+----
+shards build --release
+ln -s "$PWD/bin/pdfsig" ~/bin/pdfsig
+----
+
+== CLI : `pdfsig`
+
+[source,sh]
+----
+# Signer (phrase de passe via l'environnement, jamais en ligne de commande)
+export PDFSIG_PASSPHRASE=…
+pdfsig sign -i rapport.pdf -o signe.pdf -c signataire.p12 \
+            -l b-t -t https://freetsa.org/tsr -r "Audit ISO 27001"
+
+# Long-terme (B-LT) : fournir la chaîne CA + les preuves de révocation
+pdfsig sign -i rapport.pdf -o signe.pdf -c signataire.p12 -l b-lt \
+            -t https://freetsa.org/tsr \
+            -C ca-emettrice.pem -O signataire-ocsp.der -R ca-emettrice.crl
+
+# Clé matérielle (PKCS#11 / HSM / SoftHSM) : PIN via l'environnement
+export PDFSIG_PIN=…
+pdfsig sign -i rapport.pdf -o signe.pdf -c signataire.crt -l b-t \
+            -t https://freetsa.org/tsr \
+            -k "pkcs11:token=…;object=…;type=private" -m /chemin/module.so
+
+# Vérifier (un rapport par signature ; sortie 0 si tout valide, 2 sinon)
+pdfsig verify signe.pdf -a confiance.pem
+
+pdfsig help [sign|verify]
+----
+
+Ni la phrase de passe du PKCS#12 ni le PIN PKCS#11 n'apparaissent en
+ligne de commande : on passe le *nom* d'une variable d'environnement
+(`-p`/`--passphrase-env`, `-P`/`--pkcs11-pin-env`) qui les porte, donc
+hors `ps`.
 
 == Dépendances
 

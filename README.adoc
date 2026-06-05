@@ -150,13 +150,55 @@ cms`, `openssl ts` and poppler's `pdfsig`.
 
 == Install
 
+As a library :
+
 [source,yaml]
 ----
 dependencies:
   pdf-signature:
     github: aloli-crystal/pdf-signature
-    version: "~> 0.1"
+    version: "~> 0.7"
 ----
+
+As the `pdfsig` command-line tool — build and symlink (no `sudo`, no
+copy into `/usr/local/bin`) :
+
+[source,sh]
+----
+shards build --release
+ln -s "$PWD/bin/pdfsig" ~/bin/pdfsig
+----
+
+== CLI : `pdfsig`
+
+[source,sh]
+----
+# Sign (passphrase via the environment, never on the command line)
+export PDFSIG_PASSPHRASE=…
+pdfsig sign -i report.pdf -o signed.pdf -c signer.p12 \
+            -l b-t -t https://freetsa.org/tsr -r "ISO 27001 audit"
+
+# Long-term (B-LT) : supply the CA chain + revocation proofs
+pdfsig sign -i report.pdf -o signed.pdf -c signer.p12 -l b-lt \
+            -t https://freetsa.org/tsr \
+            -C issuing-ca.pem -O signer-ocsp.der -R issuing-ca.crl
+
+# Hardware key (PKCS#11 / HSM / SoftHSM) : PIN via the environment
+export PDFSIG_PIN=…
+pdfsig sign -i report.pdf -o signed.pdf -c signer.crt -l b-t \
+            -t https://freetsa.org/tsr \
+            -k "pkcs11:token=…;object=…;type=private" -m /path/to/module.so
+
+# Verify (one report per signature ; exit 0 if all valid, 2 otherwise)
+pdfsig verify signed.pdf -a trust.pem
+
+pdfsig help [sign|verify]
+----
+
+Neither the PKCS#12 passphrase nor the PKCS#11 PIN ever appears on the
+command line : you pass the *name* of an environment variable
+(`-p`/`--passphrase-env`, `-P`/`--pkcs11-pin-env`) that holds it, so it
+stays out of `ps`.
 
 == Dependencies
 
