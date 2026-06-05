@@ -1,11 +1,11 @@
 require "option_parser"
 require "./pdf-signature"
 
-# pdfsig — CLI de signature PDF (PAdES) du shard aloli-crystal/pdf-signature.
+# pdf-sign — CLI de signature PDF (PAdES) du shard aloli-crystal/pdf-signature.
 #
-#   pdfsig sign   -i in.pdf -o out.pdf -c signer.p12 [-l b-t -t URL …]
-#   pdfsig verify out.pdf [-a trust.pem]
-#   pdfsig help [sous-commande]
+#   pdf-sign sign   -i in.pdf -o out.pdf -c signer.p12 [-l b-t -t URL …]
+#   pdf-sign verify out.pdf [-a trust.pem]
+#   pdf-sign help [sous-commande]
 #
 # Sécurité : ni la phrase de passe du PKCS#12 ni le PIN PKCS#11 ne
 # transitent par la ligne de commande (jamais visibles dans `ps`). On
@@ -37,21 +37,21 @@ ca_bundle : String? = nil
 
 parser = OptionParser.new do |opt|
   opt.banner = <<-BANNER
-    Usage : pdfsig SOUS-COMMANDE [options]
+    Usage : pdf-sign SOUS-COMMANDE [options]
 
     Sous-commandes :
-      pdfsig sign   -i ENTREE.pdf -o SORTIE.pdf -c CERT [options]
+      pdf-sign sign   -i ENTREE.pdf -o SORTIE.pdf -c CERT [options]
         Signe un PDF (incremental update, octets d'origine intacts).
         -c est un PKCS#12 (.p12/.pfx), ou — avec --pkcs11-key — le
         certificat du signataire (PEM). Niveaux : b-b (défaut), b-t,
         b-lt, b-lta. Dès b-t une TSA est requise (-t).
 
-      pdfsig verify SIGNE.pdf [-a TRUST.pem]
+      pdf-sign verify SIGNE.pdf [-a TRUST.pem]
         Vérifie chaque champ de signature : niveau PAdES, validité
         cryptographique, couverture du document. Avec -a, valide aussi
         les chaînes signataire/TSA contre ce bundle de confiance.
 
-      pdfsig help [SOUS-COMMANDE]
+      pdf-sign help [SOUS-COMMANDE]
         Aide globale, ou focalisée sur une sous-commande.
 
     Options de `sign` :
@@ -92,7 +92,7 @@ parser = OptionParser.new do |opt|
   opt.separator ""
   opt.separator "Aide :"
   opt.on("-v", "--version", "Affiche la version") do
-    puts "pdfsig #{PDF::Signature::VERSION}"
+    puts "pdf-sign #{PDF::Signature::VERSION}"
     exit 0
   end
   opt.on("-h", "--help", "Affiche l'aide") do
@@ -111,7 +111,7 @@ positional = [] of String
 parser.unknown_args { |args| positional = args }
 parser.parse(ARGV)
 
-# ─── `pdfsig level → Symbol` ──────────────────────────────────────────
+# ─── `pdf-sign level → Symbol` ──────────────────────────────────────────
 def parse_level(raw : String) : Symbol
   case raw.downcase.tr("-", "_")
   when "b_b"   then :b_b
@@ -136,7 +136,7 @@ if !positional.empty? && {"help", "-h", "--help"}.includes?(positional.first)
   target = sub.downcase
   unless VALID_SUBCOMMANDS.includes?(target)
     STDERR.puts "Aide indisponible pour « #{sub} » (sous-commandes : #{VALID_SUBCOMMANDS.join(", ")})."
-    STDERR.puts "Utilisez `pdfsig help` pour l'aide globale."
+    STDERR.puts "Utilisez `pdf-sign help` pour l'aide globale."
     exit 1
   end
   puts parser
@@ -149,7 +149,7 @@ subcommand = positional.first?
 
 case subcommand
 when "version"
-  puts "pdfsig #{PDF::Signature::VERSION}"
+  puts "pdf-sign #{PDF::Signature::VERSION}"
   exit 0
 when "sign"
   if input.empty? || output.empty? || certificate.empty?
@@ -191,7 +191,7 @@ when "verify"
   target = positional[1]?
   if target.nil? || target.empty?
     STDERR.puts "Erreur : `verify` exige un PDF en argument."
-    STDERR.puts "Usage : pdfsig verify SIGNE.pdf [-a TRUST.pem]"
+    STDERR.puts "Usage : pdf-sign verify SIGNE.pdf [-a TRUST.pem]"
     exit 1
   end
   begin
@@ -212,7 +212,7 @@ when "verify"
     exit 1
   end
 when nil
-  STDERR.puts "Erreur : aucune sous-commande. Essayez `pdfsig help`."
+  STDERR.puts "Erreur : aucune sous-commande. Essayez `pdf-sign help`."
   STDERR.puts parser
   exit 1
 else

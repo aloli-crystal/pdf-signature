@@ -7,6 +7,25 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.11.0 — 2026-06-05 — Binary renamed `pdfsig` → `pdf-sign`
+
+=== Changed
+
+* **The CLI binary is renamed `pdfsig` → `pdf-sign`** to avoid a name
+  collision with **poppler's** `pdfsig`, a different tool that ships on
+  most systems (and which this project even uses as a validation
+  oracle). Calling a bare `pdfsig` off `PATH` was ambiguous; `pdf-sign`
+  is unambiguous and lets downstream tools (e.g. crystal-combine-pdf's
+  `sign` / `verify`) auto-detect the ALOLI signer without risk.
+* `targets:` in `shard.yml`, the install symlink in the READMEs, and the
+  CLI's own usage / version strings now use `pdf-sign`. The library API
+  (`PDF::Signature::Signer` / `Verifier`) is unchanged.
+
+=== Migration
+
+Re-create the symlink under the new name:
+`ln -s "$PWD/bin/pdf-sign" ~/bin/pdf-sign` (remove any old `~/bin/pdfsig`).
+
 == v0.10.0 — 2026-06-05 — Backend PKCS#11 par provider (OpenSSL 3.x)
 
 === Added

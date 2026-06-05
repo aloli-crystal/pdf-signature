@@ -1,10 +1,10 @@
 require "./spec_helper"
 
-# Tests d'intégration de la CLI `pdfsig` : un aller-retour sign → verify
+# Tests d'intégration de la CLI `pdf-sign` : un aller-retour sign → verify
 # sur un vrai PDF, via le binaire compilé. La phrase de passe passe par
 # l'environnement (jamais en argv).
-describe "pdfsig sign / verify" do
-  cli_binary = File.join(SpecHelper::TMP_DIR, "pdfsig-cli-test")
+describe "pdf-sign sign / verify" do
+  cli_binary = File.join(SpecHelper::TMP_DIR, "pdf-sign-cli-test")
   p12 = File.join(SpecHelper::TMP_DIR, "cli.p12")
   src = File.join(SpecHelper::TMP_DIR, "cli-src.pdf")
   signed = File.join(SpecHelper::TMP_DIR, "cli-signed.pdf")

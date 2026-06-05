@@ -3,8 +3,8 @@ require "./spec_helper"
 # Spec d'intégration : la sous-commande `help` (équivalent UX standard
 # de `--help`, et `help <sub>` focalise sur une sous-commande). Build le
 # binaire une fois pour tous les tests.
-describe "pdfsig help" do
-  cli_binary = File.join(SpecHelper::TMP_DIR, "pdfsig-help-test")
+describe "pdf-sign help" do
+  cli_binary = File.join(SpecHelper::TMP_DIR, "pdf-sign-help-test")
 
   before_all do
     Dir.mkdir_p(File.dirname(cli_binary))
@@ -23,7 +23,7 @@ describe "pdfsig help" do
     status = Process.run(cli_binary, ["help"], output: buf, error: buf)
     status.success?.should be_true
     text = buf.to_s
-    text.should contain("Usage : pdfsig")
+    text.should contain("Usage : pdf-sign")
     text.should contain("sign")
     text.should contain("verify")
   end
@@ -51,12 +51,12 @@ describe "pdfsig help" do
     %w(-h --help).each do |variant|
       buf = IO::Memory.new
       Process.run(cli_binary, [variant], output: buf, error: buf).success?.should be_true
-      buf.to_s.should contain("Usage : pdfsig")
+      buf.to_s.should contain("Usage : pdf-sign")
     end
     %w(-v --version version).each do |variant|
       buf = IO::Memory.new
       Process.run(cli_binary, [variant], output: buf, error: buf).success?.should be_true
-      buf.to_s.should contain("pdfsig #{PDF::Signature::VERSION}")
+      buf.to_s.should contain("pdf-sign #{PDF::Signature::VERSION}")
     end
   end
 

@@ -1,5 +1,5 @@
 name: pdf-signature
-version: 0.10.0
+version: 0.11.0
 
 description: |
   Pure Crystal library for PDF digital signatures (PAdES baseline
@@ -28,7 +28,7 @@ crystal: ">= 1.10.0"
 license: MIT
 
 targets:
-  pdfsig:
+  pdf-sign:
     main: src/cli.cr
 
 dependencies:

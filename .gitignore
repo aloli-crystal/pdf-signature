@@ -8,7 +8,7 @@
 # Binaires compilés
 /pdf-signature
 /pdf_signature
-/pdfsig
+/pdf-sign
 
 # Editor / OS
 .vscode/
