@@ -7,6 +7,29 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.10.0 — 2026-06-05 — Backend PKCS#11 par provider (OpenSSL 3.x)
+
+=== Ajouté
+
+* **Backend provider `pkcs11prov`** (libp11 ≥ 0.4.12) — le successeur
+  moderne de l'engine. `Pkcs11.cms_sign_provider` / `rsa_sign_provider`
+  chargent la clé `pkcs11:` via l'OSSL_STORE du provider (config
+  `OPENSSL_CONF` activant `pkcs11prov` + le provider `default`, module du
+  token via `PKCS11_MODULE_PATH`), sans l'API engine héritée. PIN par
+  variable d'environnement (jamais en argv). `Pkcs11.provider_path`
+  auto-détecte le provider ; `Pkcs11.provider_available?` permet un repli.
+* **`Signer.sign(pkcs11_provider: true, pkcs11_provider_path:)`** /
+  `Options#pkcs11_provider?` / CLI `pdfsig sign --pkcs11-provider
+  [--pkcs11-provider-path PATH]`. Fonctionne à tous les niveaux et en
+  mode strict (le `signedAttrs` natif est signé par le token via le
+  provider). L'engine reste le défaut.
+
+=== Validation
+
+Round-trip **sign → verify** via le provider avec un token **SoftHSM**
+hermétique : la clé ne quitte pas le token, signature vérifiée par
+`openssl cms -verify`. 60 specs, ameba 0.
+
 == v0.9.0 — 2026-06-05 — /DSS d'archive récursif (B-LTA)
 
 === Ajouté

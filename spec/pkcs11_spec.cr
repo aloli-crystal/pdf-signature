@@ -53,6 +53,36 @@ describe "Signer (backend PKCS#11 / SoftHSM)" do
     end
   end
 
+  it "signe via le provider OpenSSL 3.x pkcs11prov (B-B), signature vérifiable" do
+    pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
+    pending! "SoftHSM absent" if SpecHelper.softhsm_module.nil?
+    mod = SpecHelper.softhsm_module
+    pending! "provider pkcs11prov absent" if mod.nil? || !PDF::Signature::Pkcs11.provider_available?(mod)
+    hsm = SpecHelper.setup_softhsm(File.join(SpecHelper::TMP_DIR, "hsm-prov"))
+    pending! "SoftHSM non initialisé" if hsm.nil?
+    if hsm
+      previous = ENV["SOFTHSM2_CONF"]?
+      ENV["SOFTHSM2_CONF"] = hsm[:conf]
+      begin
+        src = File.join(SpecHelper::TMP_DIR, "src-hsm-prov.pdf")
+        signed = File.join(SpecHelper::TMP_DIR, "signed-hsm-prov.pdf")
+        SpecHelper.write_minimal_pdf(src)
+
+        PDF::Signature::Signer.sign(
+          input: src, output: signed, certificate: hsm[:cert], level: :b_b,
+          pkcs11_key: hsm[:key_uri], pkcs11_module: hsm[:module], pkcs11_pin: "1234",
+          pkcs11_provider: true,
+        )
+        File.exists?(signed).should be_true
+        bytes = File.open(signed, "rb", &.getb_to_end)
+        signed_data, der = SpecHelper.extract_signature(bytes)
+        PDF::Signature::PKCS7.verify(signed_data, der).should be_true
+      ensure
+        previous ? (ENV["SOFTHSM2_CONF"] = previous) : ENV.delete("SOFTHSM2_CONF")
+      end
+    end
+  end
+
   it "signe en B-T via le token + horodatage (jeton RFC 3161 embarqué)" do
     pending! "openssl absent" unless PDF::Signature::PKCS7.openssl_available?
     pending! "SoftHSM absent" if SpecHelper.softhsm_module.nil?

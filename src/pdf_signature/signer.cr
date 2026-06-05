@@ -59,6 +59,8 @@ module PDF
         pkcs11_module : String? = nil,
         pkcs11_pin : String? = nil,
         pkcs11_engine_path : String? = nil,
+        pkcs11_provider : Bool = false,
+        pkcs11_provider_path : String? = nil,
         strict_pades : Bool = false,
         archive_dss : Bool = false,
       ) : Nil
@@ -97,6 +99,8 @@ module PDF
           pkcs11_module: pkcs11_module,
           pkcs11_pin: pkcs11_pin,
           pkcs11_engine_path: pkcs11_engine_path,
+          pkcs11_provider: pkcs11_provider,
+          pkcs11_provider_path: pkcs11_provider_path,
           strict_pades: strict_pades,
           archive_dss: archive_dss,
         )
@@ -272,15 +276,8 @@ module PDF
       private def self.produce_cms(signed : ::Bytes, options : Options) : ::Bytes
         cades = !options.level.b_b?
         strict = cades && options.strict_pades?
-        cms = if uri = options.pkcs11_key
-                module_path = options.pkcs11_module || raise(SignatureError.new("pkcs11_module requis."))
-                engine = Pkcs11.engine_path(options.pkcs11_engine_path)
-                pin = options.pkcs11_pin || ""
-                if strict
-                  PKCS7.sign_strict_pkcs11(signed, DSS.load_der(options.certificate), uri, module_path, pin, engine)
-                else
-                  Pkcs11.cms_sign(signed, options.certificate, uri, module_path, pin, engine, options.digest_algorithm, cades: cades)
-                end
+        cms = if options.pkcs11?
+                pkcs11_cms(signed, options, cades, strict)
               elsif strict
                 PKCS7.sign_strict(signed, options.certificate, options.passphrase)
               else
@@ -293,6 +290,24 @@ module PDF
           cms = PKCS7.embed_timestamp_token(cms, token)
         end
         cms
+      end
+
+      # The detached CMS produced by the PKCS#11 backend — engine or
+      # provider, software-strict (native CAdES) or `openssl cms`.
+      private def self.pkcs11_cms(signed : ::Bytes, options : Options, cades : Bool, strict : Bool) : ::Bytes
+        uri = options.pkcs11_key || raise(SignatureError.new("pkcs11_key requis."))
+        module_path = options.pkcs11_module || raise(SignatureError.new("pkcs11_module requis."))
+        pin = options.pkcs11_pin || ""
+
+        if options.pkcs11_provider?
+          provider = Pkcs11.provider_path(options.pkcs11_provider_path)
+          return Pkcs11.cms_sign_provider(signed, options.certificate, uri, module_path, pin, provider, options.digest_algorithm, cades: cades) unless strict
+          CmsBuilder.build(signed, DSS.load_der(options.certificate)) { |attrs| Pkcs11.rsa_sign_provider(attrs, uri, module_path, pin, provider) }
+        else
+          engine = Pkcs11.engine_path(options.pkcs11_engine_path)
+          return Pkcs11.cms_sign(signed, options.certificate, uri, module_path, pin, engine, options.digest_algorithm, cades: cades) unless strict
+          PKCS7.sign_strict_pkcs11(signed, DSS.load_der(options.certificate), uri, module_path, pin, engine)
+        end
       end
 
       # Overwrites `replacement`'s bytes at `offset` (same-length patch).

@@ -29,6 +29,8 @@ pkcs11_key : String? = nil
 pkcs11_module : String? = nil
 pkcs11_pin_env = "PDFSIG_PIN"
 pkcs11_engine : String? = nil
+pkcs11_provider = false
+pkcs11_provider_path : String? = nil
 strict_pades = false
 archive_dss = false
 ca_bundle : String? = nil
@@ -80,6 +82,8 @@ parser = OptionParser.new do |opt|
   opt.on("-m PATH", "--pkcs11-module=PATH", "Chemin du module PKCS#11 (.so/.dylib)") { |v| pkcs11_module = v }
   opt.on("-P VAR", "--pkcs11-pin-env=VAR", "Nom de la variable d'env portant le PIN du token (défaut : PDFSIG_PIN)") { |v| pkcs11_pin_env = v }
   opt.on("-e PATH", "--pkcs11-engine=PATH", "Chemin de l'engine OpenSSL pkcs11 (auto-détecté si absent)") { |v| pkcs11_engine = v }
+  opt.on("--pkcs11-provider", "Utiliser le provider OpenSSL 3.x pkcs11prov (libp11) au lieu de l'engine") { pkcs11_provider = true }
+  opt.on("--pkcs11-provider-path=PATH", "Chemin du provider pkcs11prov (auto-détecté si absent)") { |v| pkcs11_provider_path = v }
 
   opt.separator ""
   opt.separator "Options de `verify` :"
@@ -172,6 +176,8 @@ when "sign"
       pkcs11_module: pkcs11_module,
       pkcs11_pin: pkcs11_key ? (ENV[pkcs11_pin_env]? || "") : "",
       pkcs11_engine_path: pkcs11_engine,
+      pkcs11_provider: pkcs11_provider,
+      pkcs11_provider_path: pkcs11_provider_path,
       strict_pades: strict_pades,
       archive_dss: archive_dss,
     )

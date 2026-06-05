@@ -77,6 +77,11 @@ module PDF
       property pkcs11_pin : String?
       property pkcs11_engine_path : String?
 
+      # Utiliser le **provider** OpenSSL 3.x (`pkcs11prov`, libp11 ≥ 0.4.12)
+      # au lieu de l'engine legacy. Même résultat, plomberie moderne.
+      property? pkcs11_provider : Bool
+      property pkcs11_provider_path : String?
+
       # `true` quand la signature doit passer par le backend PKCS#11.
       def pkcs11? : Bool
         !@pkcs11_key.nil?
@@ -119,6 +124,8 @@ module PDF
         @pkcs11_module : String? = nil,
         @pkcs11_pin : String? = nil,
         @pkcs11_engine_path : String? = nil,
+        @pkcs11_provider : Bool = false,
+        @pkcs11_provider_path : String? = nil,
         @strict_pades : Bool = false,
         @archive_dss : Bool = false,
       )
