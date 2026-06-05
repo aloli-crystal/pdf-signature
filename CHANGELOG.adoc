@@ -7,6 +7,31 @@ here. The format follows
 https://keepachangelog.com/1.1.0/[Keep a Changelog] and versioning
 follows https://semver.org/[SemVer].
 
+== v0.9.0 — 2026-06-05 — /DSS d'archive récursif (B-LTA)
+
+=== Added
+
+* **`DSS.add_archive_validation`** — après le DocTimeStamp d'archive,
+  enrichit le `/DSS` du **certificat de la TSA d'archive** (récolté du
+  jeton RFC 3161) plus d'éventuels CRL/OCSP, et ajoute un `/VRI` clé par
+  le `/Contents` du DocTimeStamp. Le store existant est **fusionné** (les
+  références aux flux du signataire restent valides), pas remplacé. C'est
+  ce qui rend l'horodatage d'archive lui-même validable à long terme
+  (ETSI EN 319 142-1, niveau LTA).
+* **`Signer.sign(level: :b_lta, archive_dss: true)`** / `Options#archive_dss?`
+  / CLI `pdfsig sign --archive-dss` (`-A`). **Opt-in** : ce matériel
+  s'ajoutant *après* le DocTimeStamp, celui-ci ne couvre alors plus tout
+  le document (un horodatage d'archive de renouvellement le scellerait) —
+  un B-LTA par défaut garde un DocTimeStamp qui couvre tout.
+
+=== Validation
+
+B-LTA enrichi : **5 révisions incrémentales** (original + B-T + DSS +
+DocTimeStamp + DSS d'archive), signature d'origine toujours valide
+(`pdfsig` : « Signature is Valid »), `/DSS` final fusionné portant le
+certificat de la TSA d'archive et **deux entrées `/VRI`** (signature +
+DocTimeStamp). 59 specs, ameba 0.
+
 == v0.8.0 — 2026-06-05 — PAdES strict (CMS natif, sans signing-time)
 
 === Added

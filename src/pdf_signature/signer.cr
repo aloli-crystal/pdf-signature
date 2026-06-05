@@ -60,6 +60,7 @@ module PDF
         pkcs11_pin : String? = nil,
         pkcs11_engine_path : String? = nil,
         strict_pades : Bool = false,
+        archive_dss : Bool = false,
       ) : Nil
         unless File.exists?(input)
           raise SignatureError.new("Fichier d'entrée introuvable : #{input}")
@@ -97,6 +98,7 @@ module PDF
           pkcs11_pin: pkcs11_pin,
           pkcs11_engine_path: pkcs11_engine_path,
           strict_pades: strict_pades,
+          archive_dss: archive_dss,
         )
 
         case
@@ -106,21 +108,30 @@ module PDF
         end
       end
 
-      # PAdES **B-LTA** : produce a B-LT signature (B-T + `/DSS`), then
-      # append a document timestamp (`/DocTimeStamp`) sealing the whole
-      # document — validation material included — in trusted time.
+      # PAdES **B-LTA** : produce a B-LT signature (B-T + `/DSS`), append a
+      # document timestamp (`/DocTimeStamp`) sealing the whole document —
+      # validation material included — in trusted time, then enrich the
+      # `/DSS` with the archive TSA's own certificate (harvested from the
+      # timestamp token) so the archive timestamp is itself long-term
+      # validatable.
       def self.sign_long_term_archive(input : String, output : String, options : Options) : Nil
         tsa = options.tsa_url
         raise SignatureError.new("B-LTA exige une TSA (tsa_url).") unless tsa
-        tmp = File.tempname("pdf-signature-blt", ".pdf")
+        blt = File.tempname("pdf-signature-blt", ".pdf")
+        dts = File.tempname("pdf-signature-dts", ".pdf")
         begin
           b_lt = options.dup
           b_lt.level = Level::B_LT
-          sign_long_term(input, tmp, b_lt)
-          DocTimeStamp.add(tmp, output, tsa, options.tsa_digest_algorithm,
+          sign_long_term(input, blt, b_lt)
+          # When not enriching, the DocTimeStamp writes the final output
+          # directly and keeps covering the whole document.
+          dts_out = options.archive_dss? ? dts : output
+          DocTimeStamp.add(blt, dts_out, tsa, options.tsa_digest_algorithm,
             options.tsa_username, options.tsa_password, options.contents_size)
+          DSS.add_archive_validation(dts, output) if options.archive_dss?
         ensure
-          File.delete(tmp) if File.exists?(tmp)
+          File.delete(blt) if File.exists?(blt)
+          File.delete(dts) if File.exists?(dts)
         end
       end
 

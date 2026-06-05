@@ -88,6 +88,15 @@ module PDF
       # niveaux CAdES (B-T et au-dessus) ; SHA-256 uniquement.
       property? strict_pades : Bool
 
+      # Enrichissement du `/DSS` (B-LTA) : après le DocTimeStamp, ajouter
+      # le certificat de la TSA d'archive (extrait du jeton) + un `/VRI`
+      # clé par le DocTimeStamp, pour rendre l'horodatage d'archive
+      # lui-même validable à long terme. Comme ce matériel est ajouté
+      # *après* le DocTimeStamp, celui-ci ne couvre plus tout le document
+      # (un horodatage d'archive de renouvellement le scellerait). Désactivé
+      # par défaut : un B-LTA simple garde un DocTimeStamp qui couvre tout.
+      property? archive_dss : Bool
+
       def initialize(
         @certificate : String,
         @passphrase : String = "",
@@ -111,6 +120,7 @@ module PDF
         @pkcs11_pin : String? = nil,
         @pkcs11_engine_path : String? = nil,
         @strict_pades : Bool = false,
+        @archive_dss : Bool = false,
       )
         validate!
       end

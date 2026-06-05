@@ -67,6 +67,108 @@ module PDF
         File.write(output, io.to_slice)
       end
 
+      # Enriches an existing `/DSS` with the validation material of the
+      # **document timestamp** (PAdES B-LTA) : the archive TSA's
+      # certificate (harvested from the DocTimeStamp token) plus any
+      # caller-supplied CRL/OCSP, and a `/VRI` entry keyed by the
+      # DocTimeStamp's `/Contents`. The existing store is preserved
+      # (merged), so the signature's own material stays referenced. A no-op
+      # (the file is copied unchanged) when there is no document timestamp.
+      def self.add_archive_validation(input : String, output : String,
+                                      crls : ::Array(::Bytes) = [] of ::Bytes,
+                                      ocsps : ::Array(::Bytes) = [] of ::Bytes) : Nil
+        raise SignatureError.new("Fichier d'entrée introuvable : #{input}") unless File.exists?(input)
+        original = File.open(input, "rb", &.getb_to_end)
+        reader = ::PDF::Reader.open(input)
+        root_ref = reader.trailer["Root"]?.as?(::PDF::Objects::Reference)
+        raise SignatureError.new("Trailer sans /Root — PDF illisible.") unless root_ref
+        catalog = reader.resolve(root_ref).as?(::PDF::Objects::Dictionary)
+        raise SignatureError.new("Catalog introuvable.") unless catalog
+
+        token = document_timestamp_der(reader)
+        unless token
+          File.write(output, original) # pas d'horodatage de document : rien à enrichir
+          return
+        end
+        certs = PKCS7.certificates(token)
+        if certs.empty? && crls.empty? && ocsps.empty?
+          File.write(output, original)
+          return
+        end
+
+        vri_key = Digest::SHA1.hexdigest(token).upcase
+        existing = catalog["DSS"]?.try { |ref| reader.resolve(ref) }.as?(::PDF::Objects::Dictionary)
+        max_id = [reader.objects.keys.max, root_ref.object_number].max
+        next_id = max_id
+        cert_ids = certs.map { next_id += 1 }
+        crl_ids = crls.map { next_id += 1 }
+        ocsp_ids = ocsps.map { next_id += 1 }
+        dss_id = (next_id += 1)
+
+        io = IO::Memory.new
+        io.write(original)
+        io << '\n' unless original.empty? || original[-1] == 0x0A_u8
+
+        offsets = {} of Int32 => Int32
+        certs.each_with_index { |der, i| emit_stream(io, offsets, cert_ids[i], der) }
+        crls.each_with_index { |der, i| emit_stream(io, offsets, crl_ids[i], der) }
+        ocsps.each_with_index { |der, i| emit_stream(io, offsets, ocsp_ids[i], der) }
+        Incremental.emit_object(io, offsets, dss_id, merged_dss_dict(existing, cert_ids, crl_ids, ocsp_ids, vri_key))
+        Incremental.emit_object(io, offsets, root_ref.object_number, catalog_override(catalog, dss_id))
+
+        xref_offset = io.size
+        io << Incremental.build_xref(offsets)
+        io << "trailer\n<< /Size #{dss_id + 1} /Root #{root_ref.object_number} 0 R"
+        io << " /Prev #{Incremental.find_startxref(original)} /ID #{Incremental.id_array_string(reader, original)} >>\n"
+        io << "startxref\n#{xref_offset}\n%%EOF\n"
+
+        File.write(output, io.to_slice)
+      end
+
+      # The `/DSS` string merging the existing store's references with the
+      # newly emitted streams and a fresh `/VRI` entry for the document
+      # timestamp.
+      private def self.merged_dss_dict(existing : ::PDF::Objects::Dictionary?,
+                                       cert_ids, crl_ids, ocsp_ids, vri_key : String) : String
+        certs = existing_refs(existing, "Certs") + cert_ids.map { |id| "#{id} 0 R" }
+        crls = existing_refs(existing, "CRLs") + crl_ids.map { |id| "#{id} 0 R" }
+        ocsps = existing_refs(existing, "OCSPs") + ocsp_ids.map { |id| "#{id} 0 R" }
+
+        ::String.build do |str|
+          str << "<< /Type /DSS"
+          str << " /Certs [" << certs.join(' ') << "]" unless certs.empty?
+          str << " /CRLs [" << crls.join(' ') << "]" unless crls.empty?
+          str << " /OCSPs [" << ocsps.join(' ') << "]" unless ocsps.empty?
+          str << " /VRI << "
+          existing_vri(existing).each { |key, body| str << "/" << key << " " << body << " " }
+          str << "/" << vri_key << " << "
+          str << "/Cert " << ref_array(cert_ids) << " " unless cert_ids.empty?
+          str << "/CRL " << ref_array(crl_ids) << " " unless crl_ids.empty?
+          str << "/OCSP " << ref_array(ocsp_ids) << " " unless ocsp_ids.empty?
+          str << ">> >> >>"
+        end
+      end
+
+      # The `"N 0 R"` references already held in `existing["/key"]`.
+      private def self.existing_refs(existing : ::PDF::Objects::Dictionary?, key : String) : ::Array(String)
+        arr = existing.try(&.[key]?).try(&.as?(::PDF::Objects::Array))
+        return [] of String unless arr
+        arr.compact_map { |entry| entry.as?(::PDF::Objects::Reference).try { |ref| "#{ref.object_number} 0 R" } }
+      end
+
+      # The existing `/VRI` entries as `{key => serialised-sub-dict}`,
+      # carried over verbatim into the merged store.
+      private def self.existing_vri(existing : ::PDF::Objects::Dictionary?) : ::Hash(String, String)
+        result = {} of String => String
+        vri = existing.try(&.["VRI"]?).try(&.as?(::PDF::Objects::Dictionary))
+        return result unless vri
+        vri.each do |key, value|
+          entry = value.as?(::PDF::Objects::Dictionary)
+          result[key.value] = entry.to_pdf if entry
+        end
+        result
+      end
+
       # Loads a certificate / CRL / OCSP file into its DER bytes,
       # accepting either DER or PEM (`-----BEGIN …-----`) input.
       def self.load_der(path : String) : ::Bytes
@@ -143,24 +245,47 @@ module PDF
         str.value.to_slice
       end
 
-      # Walks catalog → /AcroForm → /Fields to the first `/FT /Sig` field
-      # bearing a `/V` signature dictionary.
+      # The first `/FT /Sig` field's `/V` signature dictionary.
       private def self.signature_dict(reader : ::PDF::Reader) : ::PDF::Objects::Dictionary
+        signature_dicts(reader).first? ||
+          raise SignatureError.new("Aucun champ /FT /Sig signé (/V) trouvé.")
+      end
+
+      # Every `/FT /Sig` field's `/V` value dictionary, in `/Fields` order
+      # (ordinary signatures and document timestamps).
+      private def self.signature_dicts(reader : ::PDF::Reader) : ::Array(::PDF::Objects::Dictionary)
+        result = [] of ::PDF::Objects::Dictionary
         catalog = resolve?(reader, reader.trailer["Root"]?).as?(::PDF::Objects::Dictionary)
-        raise SignatureError.new("Catalog introuvable.") unless catalog
+        return result unless catalog
         acroform = resolve?(reader, catalog["AcroForm"]?).as?(::PDF::Objects::Dictionary)
-        raise SignatureError.new("PDF sans /AcroForm — aucun champ de signature.") unless acroform
+        return result unless acroform
         fields = resolve?(reader, acroform["Fields"]?).as?(::PDF::Objects::Array)
-        raise SignatureError.new("AcroForm sans /Fields.") unless fields
+        return result unless fields
 
         fields.each do |entry|
           field = reader.resolve(entry).as?(::PDF::Objects::Dictionary)
           next unless field
           next unless field["FT"]?.try(&.as?(::PDF::Objects::Name)).try(&.value) == "Sig"
           value = resolve?(reader, field["V"]?).as?(::PDF::Objects::Dictionary)
-          return value if value
+          result << value if value
         end
-        raise SignatureError.new("Aucun champ /FT /Sig signé (/V) trouvé.")
+        result
+      end
+
+      # The trimmed `/Contents` DER of the document timestamp
+      # (`/Type /DocTimeStamp` or `/SubFilter /ETSI.RFC3161`), or `nil`.
+      private def self.document_timestamp_der(reader : ::PDF::Reader) : ::Bytes?
+        dict = signature_dicts(reader).find do |sig|
+          type = sig["Type"]?.try(&.as?(::PDF::Objects::Name)).try(&.value)
+          sub = sig["SubFilter"]?.try(&.as?(::PDF::Objects::Name)).try(&.value)
+          type == "DocTimeStamp" || sub == "ETSI.RFC3161"
+        end
+        return nil unless dict
+        str = dict["Contents"]?.try(&.as?(::PDF::Objects::Str))
+        return nil unless str
+        raw = str.value.to_slice
+        _, finish = ASN1.parse_at(raw, 0)
+        raw[0, finish]
       end
 
       # `reader.resolve` but tolerant of a `nil` (absent key) — returns
