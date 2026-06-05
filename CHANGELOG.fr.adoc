@@ -7,6 +7,18 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.12.0 — 2026-06-05 — Point d'entrée CLI appelable `PDF::Signature::Cli.run`
+
+=== Ajouté
+
+* **`PDF::Signature::Cli.run(argv) : Int32`** (`src/pdf-signature/cli.cr`).
+  La logique CLI quitte le script top-level `src/cli.cr` pour devenir une
+  méthode, exécutable à la fois comme binaire `pdf-sign` autonome ET en
+  interne depuis le binaire unifié `alolipdf` (aloli-crystal/pdf-tools) —
+  sans shell-out. `src/cli.cr` n'est plus qu'un wrapper d'une ligne
+  (`exit PDF::Signature::Cli.run(ARGV)`). Comportement inchangé : 60 specs
+  au vert (dont les tests d'intégration sign→verify), ameba propre.
+
 == v0.11.0 — 2026-06-05 — Binaire renommé `pdfsig` → `pdf-sign`
 
 === Modifié
