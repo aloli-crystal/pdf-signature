@@ -48,12 +48,12 @@ describe "pdf-sign help" do
 
   it "accepte `-h`, `--help` et `version` / `-v`" do
     pending! "binaire CLI absent" unless File.exists?(cli_binary)
-    %w(-h --help).each do |variant|
+    %w[-h --help].each do |variant|
       buf = IO::Memory.new
       Process.run(cli_binary, [variant], output: buf, error: buf).success?.should be_true
       buf.to_s.should contain("Usage : pdf-sign")
     end
-    %w(-v --version version).each do |variant|
+    %w[-v --version version].each do |variant|
       buf = IO::Memory.new
       Process.run(cli_binary, [variant], output: buf, error: buf).success?.should be_true
       buf.to_s.should contain("pdf-sign #{PDF::Signature::VERSION}")

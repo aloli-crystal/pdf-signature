@@ -7,6 +7,12 @@ sont documentées ici. Le format suit
 https://keepachangelog.com/1.1.0/[Keep a Changelog] et le
 versioning suit https://semver.org/[SemVer].
 
+== v0.12.1 — 2026-10-16
+
+=== Modifié
+
+* ameba 1.7 et Crystal 1.22.0 en CI ; nouvelles règles appliquées, aucun changement de comportement.
+
 == v0.12.0 — 2026-06-05 — Point d'entrée CLI appelable `PDF::Signature::Cli.run`
 
 === Ajouté

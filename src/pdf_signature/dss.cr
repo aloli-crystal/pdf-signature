@@ -280,9 +280,9 @@ module PDF
           sub = sig["SubFilter"]?.try(&.as?(::PDF::Objects::Name)).try(&.value)
           type == "DocTimeStamp" || sub == "ETSI.RFC3161"
         end
-        return nil unless dict
+        return unless dict
         str = dict["Contents"]?.try(&.as?(::PDF::Objects::Str))
-        return nil unless str
+        return unless str
         raw = str.value.to_slice
         _, finish = ASN1.parse_at(raw, 0)
         raw[0, finish]

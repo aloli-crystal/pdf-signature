@@ -134,18 +134,18 @@ module PDF
       # default provider for RSA/SHA). Loaded via `OPENSSL_CONF`.
       private def self.provider_config(provider_path : String) : String
         <<-CNF
-        openssl_conf = osslinit
-        [osslinit]
-        providers = prov_sect
-        [prov_sect]
-        pkcs11prov = pkcs11_sect
-        default = default_sect
-        [pkcs11_sect]
-        module = #{provider_path}
-        activate = 1
-        [default_sect]
-        activate = 1
-        CNF
+          openssl_conf = osslinit
+          [osslinit]
+          providers = prov_sect
+          [prov_sect]
+          pkcs11prov = pkcs11_sect
+          default = default_sect
+          [pkcs11_sect]
+          module = #{provider_path}
+          activate = 1
+          [default_sect]
+          activate = 1
+          CNF
       end
 
       private def self.provider_or_candidate(provider_path : String?) : String?
@@ -214,17 +214,17 @@ module PDF
       # subprocess only.
       private def self.engine_config(engine_path : String, module_path : String) : String
         <<-CNF
-        openssl_conf = openssl_init
-        [openssl_init]
-        engines = engine_section
-        [engine_section]
-        pkcs11 = pkcs11_section
-        [pkcs11_section]
-        engine_id = pkcs11
-        dynamic_path = #{engine_path}
-        MODULE_PATH = #{module_path}
-        init = 0
-        CNF
+          openssl_conf = openssl_init
+          [openssl_init]
+          engines = engine_section
+          [engine_section]
+          pkcs11 = pkcs11_section
+          [pkcs11_section]
+          engine_id = pkcs11
+          dynamic_path = #{engine_path}
+          MODULE_PATH = #{module_path}
+          init = 0
+          CNF
       end
 
       private def self.explicit_or_candidate(engine_path : String?) : String?

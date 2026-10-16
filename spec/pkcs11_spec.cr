@@ -4,12 +4,10 @@ describe PDF::Signature::Pkcs11 do
   it "résout un chemin d'engine ou lève une erreur explicite" do
     # On ne dépend pas de la présence de l'engine : soit un chemin
     # existant est trouvé, soit une SignatureError d'aide est levée.
-    begin
-      path = PDF::Signature::Pkcs11.engine_path
-      File.exists?(path).should be_true
-    rescue ex : PDF::Signature::SignatureError
-      ex.message.to_s.should match(/libp11|engine/i)
-    end
+    path = PDF::Signature::Pkcs11.engine_path
+    File.exists?(path).should be_true
+  rescue ex : PDF::Signature::SignatureError
+    ex.message.to_s.should match(/libp11|engine/i)
   end
 end
 

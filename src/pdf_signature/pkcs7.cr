@@ -185,7 +185,7 @@ module PDF
       def self.timestamp_token(cms_der : ::Bytes) : ::Bytes?
         signer_info = signer_info_of(ASN1.parse(cms_der))
         unsigned = signer_info.children.find { |child| child.tag == 0xA1_u8 }
-        return nil unless unsigned
+        return unless unsigned
 
         oid_bytes = ASN1.encode_oid(SIG_TIMESTAMP_OID)
         unsigned.children.each do |attribute|

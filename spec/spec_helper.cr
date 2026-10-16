@@ -23,7 +23,7 @@ module SpecHelper
     # Returns `nil` if `openssl` is unavailable or the cert generation
     # fails (older openssl without `-addext`), so callers can `pending!`.
     def self.start(dir : String) : LocalTSA?
-      return nil unless Process.find_executable("openssl")
+      return unless Process.find_executable("openssl")
       Dir.mkdir_p(dir)
       cert = File.join(dir, "tsa.crt")
       key = File.join(dir, "tsa.key")
@@ -36,7 +36,7 @@ module SpecHelper
         "-addext", "keyUsage=critical,digitalSignature",
         "-addext", "extendedKeyUsage=critical,timeStamping",
       ], output: Process::Redirect::Close, error: Process::Redirect::Close).success?
-      return nil unless ok && File.exists?(cert)
+      return unless ok && File.exists?(cert)
 
       File.write(config, tsa_config(dir, cert, key, serial))
       File.write(serial, "01\n")
@@ -77,24 +77,24 @@ module SpecHelper
 
     private def self.tsa_config(dir : String, cert : String, key : String, serial : String) : String
       <<-CNF
-      [ tsa ]
-      default_tsa = tsa_config
-      [ tsa_config ]
-      serial = #{serial}
-      crypto_device = builtin
-      signer_cert = #{cert}
-      certs = #{cert}
-      signer_key = #{key}
-      signer_digest = sha256
-      default_policy = 1.3.6.1.4.1.99999.1.1
-      digests = sha256, sha384, sha512
-      accuracy = secs:1
-      clock_precision_digits = 0
-      ordering = yes
-      tsa_name = yes
-      ess_cert_id_chain = no
-      ess_cert_id_alg = sha256
-      CNF
+        [ tsa ]
+        default_tsa = tsa_config
+        [ tsa_config ]
+        serial = #{serial}
+        crypto_device = builtin
+        signer_cert = #{cert}
+        certs = #{cert}
+        signer_key = #{key}
+        signer_digest = sha256
+        default_policy = 1.3.6.1.4.1.99999.1.1
+        digests = sha256, sha384, sha512
+        accuracy = secs:1
+        clock_precision_digits = 0
+        ordering = yes
+        tsa_name = yes
+        ess_cert_id_chain = no
+        ess_cert_id_alg = sha256
+        CNF
     end
   end
 
@@ -192,8 +192,10 @@ module SpecHelper
   # response (generated offline by the CA acting as responder) and a CRL.
   # Returns the file paths, or `nil` if `openssl` is unavailable or any
   # step fails. No network, no responder process — everything offline.
+  # Fixture de spec linéaire (enchaînement d'appels openssl) : la découper nuirait à la lisibilité.
+  # ameba:disable Metrics/CyclomaticComplexity
   def self.issue_ltv_material(dir : String, passphrase : String = "secret")
-    return nil unless Process.find_executable("openssl")
+    return unless Process.find_executable("openssl")
     Dir.mkdir_p(dir)
     ca_key = File.join(dir, "ca.key"); ca_crt = File.join(dir, "ca.crt")
     s_key = File.join(dir, "signer.key"); s_csr = File.join(dir, "signer.csr"); s_crt = File.join(dir, "signer.crt")
@@ -202,43 +204,43 @@ module SpecHelper
     o_req = File.join(dir, "ocsp_req.der"); o_resp = File.join(dir, "ocsp_resp.der")
     ca_cnf = File.join(dir, "ca.cnf"); crl_pem = File.join(dir, "crl.pem"); crl_der = File.join(dir, "crl.der")
 
-    return nil unless openssl(["genrsa", "-out", ca_key, "2048"])
-    return nil unless openssl(["req", "-new", "-x509", "-key", ca_key, "-out", ca_crt, "-days", "5", "-subj", "/CN=ALOLI Test CA/O=ALOLI/C=FR"])
-    return nil unless openssl(["genrsa", "-out", s_key, "2048"])
-    return nil unless openssl(["req", "-new", "-key", s_key, "-out", s_csr, "-subj", "/CN=Signataire Test/O=ALOLI/C=FR"])
+    return unless openssl(["genrsa", "-out", ca_key, "2048"])
+    return unless openssl(["req", "-new", "-x509", "-key", ca_key, "-out", ca_crt, "-days", "5", "-subj", "/CN=ALOLI Test CA/O=ALOLI/C=FR"])
+    return unless openssl(["genrsa", "-out", s_key, "2048"])
+    return unless openssl(["req", "-new", "-key", s_key, "-out", s_csr, "-subj", "/CN=Signataire Test/O=ALOLI/C=FR"])
 
     File.write(ext, "authorityInfoAccess = OCSP;URI:http://127.0.0.1:8888\n" \
                     "crlDistributionPoints = URI:http://127.0.0.1:8888/crl.der\n" \
                     "keyUsage = critical,digitalSignature,nonRepudiation\n")
-    return nil unless openssl(["x509", "-req", "-in", s_csr, "-CA", ca_crt, "-CAkey", ca_key,
-                               "-CAcreateserial", "-out", s_crt, "-days", "4", "-extfile", ext])
-    return nil unless openssl(["pkcs12", "-export", "-out", p12, "-inkey", s_key, "-in", s_crt, "-passout", "pass:#{passphrase}"])
+    return unless openssl(["x509", "-req", "-in", s_csr, "-CA", ca_crt, "-CAkey", ca_key,
+                           "-CAcreateserial", "-out", s_crt, "-days", "4", "-extfile", ext])
+    return unless openssl(["pkcs12", "-export", "-out", p12, "-inkey", s_key, "-in", s_crt, "-passout", "pass:#{passphrase}"])
 
     serial = openssl_out(["x509", "-in", s_crt, "-noout", "-serial"])
-    return nil unless serial
+    return unless serial
     serial_hex = serial.split('=').last.strip
     # UTCTime YY 49 → 2049 : statut V (valide), bien dans le futur.
     File.write(index, "V\t491231235959Z\t\t#{serial_hex}\tunknown\t/CN=Signataire Test/O=ALOLI/C=FR\n")
     File.write(crlnum, "01\n")
 
-    return nil unless openssl(["ocsp", "-issuer", ca_crt, "-cert", s_crt, "-reqout", o_req])
-    return nil unless openssl(["ocsp", "-index", index, "-CA", ca_crt, "-rsigner", ca_crt,
-                               "-rkey", ca_key, "-reqin", o_req, "-respout", o_resp])
+    return unless openssl(["ocsp", "-issuer", ca_crt, "-cert", s_crt, "-reqout", o_req])
+    return unless openssl(["ocsp", "-index", index, "-CA", ca_crt, "-rsigner", ca_crt,
+                           "-rkey", ca_key, "-reqin", o_req, "-respout", o_resp])
 
     File.write(ca_cnf, <<-CNF
-    [ca]
-    default_ca = CA_default
-    [CA_default]
-    database = #{index}
-    crlnumber = #{crlnum}
-    certificate = #{ca_crt}
-    private_key = #{ca_key}
-    default_md = sha256
-    default_crl_days = 4
-    CNF
+      [ca]
+      default_ca = CA_default
+      [CA_default]
+      database = #{index}
+      crlnumber = #{crlnum}
+      certificate = #{ca_crt}
+      private_key = #{ca_key}
+      default_md = sha256
+      default_crl_days = 4
+      CNF
     )
-    return nil unless openssl(["ca", "-config", ca_cnf, "-gencrl", "-out", crl_pem])
-    return nil unless openssl(["crl", "-in", crl_pem, "-outform", "DER", "-out", crl_der])
+    return unless openssl(["ca", "-config", ca_cnf, "-gencrl", "-out", crl_pem])
+    return unless openssl(["crl", "-in", crl_pem, "-outform", "DER", "-out", crl_der])
 
     {p12: p12, ca: ca_crt, signer: s_crt, ocsp: o_resp, crl: crl_der}
   end
@@ -260,9 +262,9 @@ module SpecHelper
   # Returns the module path, the key URI, the cert path and the SoftHSM
   # config path — or `nil` if SoftHSM / softhsm2-util is unavailable.
   def self.setup_softhsm(dir : String, pin : String = "1234")
-    return nil unless Process.find_executable("openssl") && Process.find_executable("softhsm2-util")
+    return unless Process.find_executable("openssl") && Process.find_executable("softhsm2-util")
     mod = softhsm_module
-    return nil unless mod
+    return unless mod
     # Repart d'un tokendir vierge : spec/tmp persiste entre les runs et un
     # token/clé déjà présent ferait échouer --init-token / --import.
     FileUtils.rm_rf(dir)
@@ -271,12 +273,12 @@ module SpecHelper
     File.write(conf, "directories.tokendir = #{File.join(dir, "tokens")}\n")
     env = {"SOFTHSM2_CONF" => conf}
 
-    return nil unless softhsm(["--init-token", "--free", "--label", "aloli", "--pin", pin, "--so-pin", "#{pin}99"], env)
+    return unless softhsm(["--init-token", "--free", "--label", "aloli", "--pin", pin, "--so-pin", "#{pin}99"], env)
     key = File.join(dir, "hsm.key")
     cert = File.join(dir, "hsm.crt")
-    return nil unless openssl(["genrsa", "-out", key, "2048"])
-    return nil unless openssl(["req", "-new", "-x509", "-key", key, "-out", cert, "-days", "2", "-subj", "/CN=HSM Signer/O=ALOLI/C=FR"])
-    return nil unless softhsm(["--import", key, "--token", "aloli", "--label", "mykey", "--id", "01", "--pin", pin], env)
+    return unless openssl(["genrsa", "-out", key, "2048"])
+    return unless openssl(["req", "-new", "-x509", "-key", key, "-out", cert, "-days", "2", "-subj", "/CN=HSM Signer/O=ALOLI/C=FR"])
+    return unless softhsm(["--import", key, "--token", "aloli", "--label", "mykey", "--id", "01", "--pin", pin], env)
 
     {module: mod, key_uri: "pkcs11:token=aloli;object=mykey;type=private", cert: cert, conf: conf}
   end

@@ -18,7 +18,7 @@ module PDF
         end
       end
 
-      VALID_SUBCOMMANDS = %w(sign verify)
+      VALID_SUBCOMMANDS = %w[sign verify]
 
       # ameba:disable Metrics/CyclomaticComplexity
       def self.run(argv : Array(String)) : Int32
